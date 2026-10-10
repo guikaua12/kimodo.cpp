@@ -42,3 +42,11 @@ __pycache__/
 .pytest_cache/
 /output_motion/
 /.kimodo-manifests/
+
+# Generated Motion Stage outputs (clips, renders, exports); the probe and factory
+# scripts regenerate them
+/factory-output/
+/loop-preview/
+/exports/
+/docs/motion-stage-research/probe/**/*.f32
+/docs/motion-stage-research/probe/presets/preview/
