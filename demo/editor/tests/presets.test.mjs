@@ -15,7 +15,7 @@ import { SOMA30_MODEL, TOY_MODEL } from './fixtures/soma30.mjs';
 const sk = new Skeleton(SOMA30_MODEL);
 const DEG = Math.PI / 180;
 const IDS = ['acceleration', 'constant_speed', 'strafe', 'arc', 'forward_turn', 'strafe_turn', 'start', 'start_turn',
-  'stop', 'stop_turn', 'spin', 'turn_in_place'];
+  'stop', 'stop_turn', 'spin', 'turn_in_place', 'circle'];
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg ?? ''} ${a} vs ${b} (tol ${tol})`);
 const close = (a, b, tol, msg) => {
   assert.equal(a.length, b.length, msg);
@@ -96,7 +96,7 @@ test('constant_speed reproduces the probe line; strafe right reproduces strafe_r
 // definitions and params
 // ---------------------------------------------------------------------------
 
-test('PRESETS: 12 frozen definitions in Motorica order', () => {
+test('PRESETS: the 12 Motorica presets in their order, then Run in a circle; frozen', () => {
   assert.deepEqual(PRESETS.map((d) => d.id), IDS);
   assert.ok(Object.isFrozen(PRESETS) && Object.isFrozen(PRESETS[0]) && Object.isFrozen(PRESETS[0].params[0]));
   assert.equal(FPS, 30); assert.equal(MIN_FRAMES, 60); assert.equal(MAX_FRAMES, 300);
@@ -115,7 +115,9 @@ test('PRESETS: 12 frozen definitions in Motorica order', () => {
       if (pd.group === 'dynamics') assert.deepEqual([pd.min, pd.max, pd.step, pd.unit], [0.03, 1, 0.01, 's']);
       if (pd.type === 'select' || pd.type === 'side') assert.ok(pd.options.some((o) => o.value === pd.default));
     }
-    assert.ok(keys.has('duration'), `${d.id} has a duration`);
+    // circle derives its duration from laps, radius and speed
+    assert.equal(keys.has('duration'), d.id !== 'circle', `${d.id} has a duration param`);
+    assert.equal(typeof normalizeParams(d.id, {}).duration, 'number', `${d.id} has a duration`);
   }
   assert.equal(presetById('forward_turn').label, 'Forward turn');
   assert.equal(presetById('arc').label, 'Constant speed/Arc');
@@ -152,6 +154,34 @@ test('normalizeParams: defaults, clamping, rounding, sub-durations, idempotent',
   assert.ok(spin.first + spin.spin <= 2.5 + 1e-9 && spin.spin >= 0.3, JSON.stringify(spin));
   const st = normalizeParams('stop_turn', { moving: 9, duration: 2 });
   assert.ok((st.moving + 0.3 + 0.5) * 30 <= 60 - 14 + 1e-9, JSON.stringify(st));
+  // circle: laps capped so the clip is 60..300 frames, duration derived (T = laps * frames per lap + 1)
+  const lapFrames = (c) => 2 * Math.PI * c.radius / c.speed * 30;
+  const slow = normalizeParams('circle', { speed: 1, radius: 6, laps: 3, duration: 1 });
+  assert.equal(slow.laps, 0.25, 'a slow wide circle fits a quarter lap');
+  assert.equal(Math.round(slow.duration * 30), Math.round(0.25 * lapFrames(slow)) + 1);
+  const fast = normalizeParams('circle', { speed: 6, radius: 1, laps: 0.25 });
+  assert.equal(fast.laps, 1.9, 'a fast tight circle needs laps for 60 frames');
+  assert.equal(Math.round(fast.duration * 30), 61);
+  const one = normalizeParams('circle', { speed: 4, radius: 4, laps: 1 });
+  assert.deepEqual([one.laps, Math.round(one.duration * 30)], [1, 189]);
+  assert.equal(normalizeParams('circle', { speed: 2.5, radius: 4, laps: 1 }).laps, 0.95, '1 lap would be 10.05 s');
+  // laps that already fit are kept, up to the rounding edges (58.5 and 299.5 frames of path)
+  const edgeLo = normalizeParams('circle', { speed: 1.2, radius: 1.5, laps: 0.25 });
+  assert.deepEqual([edgeLo.laps, Math.round(edgeLo.duration * 30)], [0.25, 60]);
+  const edgeHi = normalizeParams('circle', { speed: 1.3, radius: 5.9, laps: 0.35 });
+  assert.deepEqual([edgeHi.laps, Math.round(edgeHi.duration * 30)], [0.35, 300]);
+  // every corner of the speed x radius x laps box: T follows from the laps that were kept
+  const pdOf = (k) => presetById('circle').params.find((d) => d.key === k);
+  for (const speed of [pdOf('speed').min, pdOf('speed').max]) {
+    for (const radius of [pdOf('radius').min, pdOf('radius').max]) {
+      for (const laps of [pdOf('laps').min, pdOf('laps').max]) {
+        const n = normalizeParams('circle', { speed, radius, laps });
+        const T = Math.round(n.duration * 30);
+        assert.equal(T, Math.round(n.laps * lapFrames(n)) + 1, `circle corner ${speed} ${radius} ${laps}`);
+        assert.ok(T >= MIN_FRAMES && T <= MAX_FRAMES, `circle corner ${speed} ${radius} ${laps}: T ${T}`);
+      }
+    }
+  }
   for (const id of IDS) {
     for (const v of variants(id)) {
       const n = normalizeParams(id, v.p);
@@ -199,6 +229,8 @@ for (const id of IDS) {
       const end = sim.heading[T - 1];
       if (['turn_in_place', 'stop_turn', 'spin'].includes(id)) {
         assert.equal(end, p.angle * DEG, `${tag}: exact end heading`);
+      } else if (id === 'circle') {
+        near(end, p.laps * 2 * Math.PI, 1e-9, `${tag}: laps x 360 degrees on the last frame`);
       } else if (id === 'forward_turn' || id === 'start_turn') {
         const err = Math.abs(wrapAngle(end - p.angle * DEG)) / DEG;
         const warned = b.warnings.some((w) => /turn does not finish/.test(w));
@@ -235,6 +267,31 @@ test('trajectories go where the recipe says', () => {
   const pre = simulatePreset('forward_turn', { turnStyle: 'pre' }), post = simulatePreset('forward_turn', { turnStyle: 'post' });
   assert.ok(pre.heading[60] > 0.3 && post.heading[60] === 0 && post.heading[70] > 0);
   assert.deepEqual(pre.xz.slice(0, 61), post.xz.slice(0, 61), 'turn style moves the facing, not the path');
+});
+
+test('circle: on the circle, facing along it, closing after whole laps, at the asked speed', () => {
+  for (const [side, laps, speed, radius] of [['left', 1, 4, 4], ['right', 1, 4, 4], ['left', 2, 5, 3], ['right', 0.5, 1.2, 1.5]]) {
+    const b = buildPreset('circle', { side, laps, speed, radius });
+    const tag = `${side} ${laps} laps ${speed} m/s r ${radius}`;
+    const { xz, heading } = b.sim;
+    const T = b.frames;
+    const cx = sideSign(side) * radius; // centre on the character's left (+X) for a left circle
+    for (let f = 0; f < T; f++) {
+      near(Math.hypot(xz[f][0] - cx, xz[f][1]), radius, 1e-9, `${tag} radius f${f}`);
+      if (f > 0 && f < T - 1) {
+        // facing = path tangent (central difference)
+        const dx = xz[f + 1][0] - xz[f - 1][0], dz = xz[f + 1][1] - xz[f - 1][1];
+        near(wrapAngle(heading[f] - Math.atan2(dx, dz)), 0, 1e-6, `${tag} tangent f${f}`);
+      }
+    }
+    near(b.sim.speed[0], speed, speed * 0.01, `${tag} speed within 1%`);
+    near(b.summary.distance_m, 2 * Math.PI * radius * laps, 0.01 * radius * laps, `${tag} distance`);
+    near(b.summary.net_turn_deg, sideSign(side) * 360 * laps, 1e-6, `${tag} net turn`);
+    if (Number.isInteger(laps)) assert.deepEqual(b.summary.end, [0, 0], `${tag}: ends on the start point`);
+  }
+  const half = simulatePreset('circle', { laps: 0.5, side: 'left', speed: 4, radius: 4 });
+  close(half.xz.at(-1), [8, 0], 1e-9, 'half a left lap ends 2R to the left');
+  near(half.heading.at(-1), Math.PI, 1e-12, 'facing back');
 });
 
 // ---------------------------------------------------------------------------
@@ -369,6 +426,24 @@ test('warnings: jog/run speeds, short turn windows, fast spins', () => {
   for (const id of IDS) assert.deepEqual(buildPreset(id, {}).warnings.filter((w) => !/jog\/run/.test(w)), [], `${id} defaults`);
 });
 
+test('warnings: Run in a circle outside the speed / turn rate / radius it was tested at', () => {
+  const W = (p) => buildPreset('circle', p).warnings;
+  assert.deepEqual(W({}), [], 'defaults (4 m/s, 4 m) are inside the tested envelope');
+  assert.deepEqual(W({ speed: 2.5, radius: 2 }), []);
+  assert.deepEqual(W({ speed: 1.2, radius: 1 }), [], 'a walking circle (69 deg/s)');
+  assert.deepEqual(W({ speed: 2.5, radius: 6 }), [], 'wide circles below running speed');
+  assert.ok(!W({ speed: 4 }).some((w) => /jog\/run/.test(w)), 'no generic jog/run warning');
+  const fast = W({ speed: 5 });
+  assert.equal(fast.length, 1); assert.match(fast[0], /^Above 4 m\/s the feet slide more/);
+  const tight = W({ speed: 4, radius: 2 });
+  assert.equal(tight.length, 1); assert.match(tight[0], /^Tight circle for the speed \(115°\/s\)/);
+  assert.deepEqual(W({ speed: 4.5, radius: 2.8 }).map((w) => w.split(' ')[0]), ['Above', 'Tight'], '4.5 m/s on 2.8 m: 92 deg/s');
+  assert.deepEqual(W({ speed: 4, radius: 2.6 }), [], '88 deg/s');
+  const wide = W({ speed: 4, radius: 5.1 });
+  assert.equal(wide.length, 1); assert.match(wide[0], /^Wide running circles can float/);
+  assert.deepEqual(W({ speed: 4, radius: 5 }), []);
+});
+
 for (const id of IDS) {
   test(`${id}: constraints pass validateModelJSON (SOMA) and survive a ConstraintStore round trip`, () => {
     const canon = (aa) => quatToAxisAngle(quatFromAxisAngle(aa));
@@ -454,6 +529,9 @@ test('prompts: sentence case, number-free, gait and side words agree with the pa
   assert.equal(P('spin', { angle: 360 }), 'A person walks forward, spins all the way around to the left and keeps walking forward.');
   assert.equal(P('turn_in_place'), 'A person stands still and then turns around to the left.');
   assert.equal(P('turn_in_place', { angle: 90, side: 'right' }), 'A person stands still and then turns to the right.');
+  assert.equal(P('circle'), 'A person runs in a circle to the left.');
+  assert.equal(P('circle', { speed: 3, side: 'right' }), 'A person jogs in a circle to the right.');
+  assert.equal(P('circle', { speed: 1.2 }), 'A person walks in a circle to the left.');
 });
 
 // ---------------------------------------------------------------------------

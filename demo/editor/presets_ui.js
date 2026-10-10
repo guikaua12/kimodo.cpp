@@ -41,7 +41,7 @@
 //   the controls (sub-durations are fitted into the clip, so e.g. a shorter
 //   Duration pulls "Turn at" in). A number box being typed in is not rewritten
 //   until it commits (change). Range sliders span the legal values given the
-//   other params.
+//   other params (min and max).
 // - The prompt follows the generated text until the user edits it; "Use
 //   generated prompt" returns to it. An empty prompt applies the generated one.
 
@@ -95,7 +95,8 @@ export function presetReadout(preset) {
   try { def = presetById(preset.id); } catch { return preset.label || ''; }
   const p = normalizeParams(preset.id, preset.params);
   const parts = [def.label];
-  if ('angle' in p) parts.push(`${p.angle}° ${p.side}`);
+  if ('laps' in p) parts.push(`${p.speed} m/s`, `${p.laps} ${p.laps === 1 ? 'lap' : 'laps'} ${p.side}, ${p.radius} m radius`);
+  else if ('angle' in p) parts.push(`${p.angle}° ${p.side}`);
   else if ('rate' in p) parts.push(`${p.rate}°/s ${p.side}`);
   else if ('speed2' in p) parts.push(`${p.speed} → ${p.speed2} m/s`);
   else if ('speed' in p) parts.push(`${p.speed} m/s`);
@@ -447,7 +448,9 @@ export class PresetsDialog {
       this._change(pd.key, box.value.trim() !== '' && Number.isFinite(v) ? v : this.current.params[pd.key]);
     });
     const row = el('div', { class: 'slider-row', title: pd.hint }, el('span', {}, label, hint), range, box);
-    const set = (v, { typing = null, max = pd.max } = {}) => {
+    const set = (v, { typing = null, min = pd.min, max = pd.max } = {}) => {
+      range.min = min;
+      box.min = min;
       range.max = max;
       box.max = max;
       range.value = v;
@@ -519,8 +522,10 @@ export class PresetsDialog {
     const p = built.params;
     for (const [key, ctl] of c.controls) {
       const pd = ctl.pd;
+      // (only Run in a circle raises a minimum: laps for 60 frames)
+      const min = pd.type === 'number' ? normalizeParams(id, { ...p, [key]: pd.min })[key] : undefined;
       const max = pd.type === 'number' ? normalizeParams(id, { ...p, [key]: pd.max })[key] : undefined;
-      ctl.set(p[key], { typing, max });
+      ctl.set(p[key], { typing, min, max });
     }
     for (const g of c.groups) {
       g.extra.textContent = g.group === 'dynamics'

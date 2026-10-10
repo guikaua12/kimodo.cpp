@@ -172,11 +172,14 @@ The page follows NVIDIA's Kimodo demo:
   Constraint are available.
 - **Make Smooth Path** turns the 2D Root waypoints into a dense, smoothed root
   path anchored at the first and last frame.
-- **Path presets** (*Browse presets…*) opens a "Parametric presets"dialog 
-  with 12 presets: Acceleration, Constant Speed, Strafe, Constant speed/Arc, 
-  Forward turn, Strafe turn, Start, Start turn, Stop, Stop turn, Spin and Turn in place. 
-  Each preset has a few parameters (speed, angle, side, timings, spring half-lives) and a live top-down preview.
-  Apply turns it into constraints: a 2D Root path with a heading on every frame
+- **Path presets** (*Browse presets…*) opens a "Parametric
+  presets" dialog with 13 presets: Acceleration, Constant Speed,
+  Strafe, Constant speed/Arc, Forward turn, Strafe turn, Start, Start turn,
+  Stop, Stop turn, Spin and Turn in place, plus Run in a circle (a closed
+  circle of a set radius and number of laps, running at 4 m/s by default).
+  Each preset has a few parameters (speed, angle, side, timings, spring
+  half-lives; radius and laps for the circle) and a live top-down preview. Apply
+  turns it into constraints: a 2D Root path with a heading on every frame
   (simulated with critically damped springs), a Hips pin at frame 0 against
   floating starts, SOMA idle-pose pins for starts, stops and in-place turns,
   a matching prompt, Post Processing on and root margin 0.06. The constraints
@@ -185,6 +188,9 @@ The page follows NVIDIA's Kimodo demo:
   is installed. Apply leaves the seed, steps and CFG weights alone; the
   presets were measured with 100 steps and CFG 2/2
   ([experiment log](docs/motion-stage-research/09-experiment-log.md)).
+  Run in a circle passed every GPU check wherever its dialog shows no
+  warning. It warns above 4 m/s (the feet slide), above 90°/s of turn (the
+  body lags the path) and on running circles wider than 5 m (they float).
 - **Save / Load Constraints** read and write the official Kimodo
   `constraints.json`. SOMA files are written with the 30 control joints, like
   the shipped SOMA examples; 77-joint files saved by the official demo are

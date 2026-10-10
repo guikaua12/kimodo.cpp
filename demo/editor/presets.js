@@ -22,7 +22,8 @@
 // - Angle params are magnitudes in degrees with a separate side param
 //   ('left' | 'right'; left = +theta). Durations are seconds in the UI and become
 //   frames with Math.round(s * 30); one clip is 60..300 frames (Go server limit
-//   for one prompt segment).
+//   for one prompt segment). Run in a circle has no Duration param: its fit()
+//   derives `duration` from laps, radius and speed.
 // - Rotating a point about +Y by theta: x' = x cos + z sin, z' = -x sin + z cos.
 //   A pose is turned by left-multiplying the Hips (joint 0) local rotation by
 //   q_yaw(theta) = (0, sin theta/2, 0, cos theta/2) (xyzw).
@@ -55,11 +56,13 @@
 //
 // API
 //   FPS, MIN_FRAMES, MAX_FRAMES, DEFAULT_DYNAMICS
-//   PRESETS                          frozen PresetDef[] in Motorica's order
+//   PRESETS                          frozen PresetDef[]: Motorica's 12 in its order, then
+//                                    Run in a circle (ours)
 //   presetById(id)                   PresetDef, or throws
 //   defaultParams(id)                fresh {key: default}
 //   normalizeParams(id, p)           defaults filled, clamped to the ParamDef ranges,
 //                                    rounded to step, sub-durations fitted into the clip
+//                                    (circle: laps capped, `duration` added)
 //   simulatePreset(id, p)            Sim {frames, xz: [x, z][T], heading: rad[T] (unwrapped), speed: m/s[T]}
 //   buildPreset(id, p, {skeletonKey = 'soma30', poses = PRESET_POSES})
 //                                    Built {id, label, params, frames, prompt, sim, constraints,
@@ -77,7 +80,8 @@
 // ParamDef: {key, label, type: 'number' | 'side' | 'select' | 'bool', default,
 //   min?, max?, step?, unit?, hint?, options?: [{value, label}],
 //   group: 'main' | 'dynamics' | 'pins'}. A preset lists only the dynamics
-//   half-lives its recipe uses (Constant Speed, Strafe and Turn in place use none).
+//   half-lives its recipe uses (Constant Speed, Strafe, Turn in place and Run in a
+//   circle use none).
 //
 // constraints order: fullbody object (if any), Hips end-effector (if any), then
 // one root2d object over frames 0..T-1 with a heading on every frame - the order
@@ -117,6 +121,15 @@ const TURN_SETTLE_DEG = 3;
 /** Gait bands (m/s): walk below WALK_MAX, jog below JOG_MAX, run above. */
 const WALK_MAX = 2.0;
 const JOG_MAX = 4.0;
+/**
+ * Run in a circle: the envelope the GPU sweep passed (research 09, "Run in a
+ * circle"): up to 4 m/s, at most 90 deg/s of turn, and no radius above 5 m at
+ * running speeds (3 m/s and up).
+ */
+const CIRCLE_MAX_SPEED = 4.0;
+const CIRCLE_MAX_RATE = 90;
+const CIRCLE_RUN_SPEED = 3.0;
+const CIRCLE_MAX_RUN_RADIUS = 5.0;
 
 const DEG = Math.PI / 180;
 const NON_SOMA_WARNING = 'Pose pins need the SOMA skeleton; this preset is sent as a path only.';
@@ -242,6 +255,16 @@ const DEFS = [
     description: 'Stands on the spot and turns to a new facing.',
     params: [angle(180, 15, 360), side(), duration(3)],
   },
+  // Not one of Motorica's presets. No Duration param: the clip length follows
+  // from laps, radius and speed (fit() stores the derived `duration`).
+  {
+    id: 'circle', label: 'Run in a circle', experimental: false,
+    description: 'Runs around a circle at a steady speed, the body turning to follow the path.',
+    params: [num('speed', 'Speed', 4.0, 1, 6, 0.1, 'm/s', { hint: 'Walk below 2 m/s, jog from 2 to 4 m/s, run above.' }),
+      num('radius', 'Radius', 4, 1, 6, 0.1, 'm', { hint: 'Distance from the centre of the circle to the path.' }),
+      num('laps', 'Laps', 1, 0.25, 3, 0.05, '', { hint: 'Times around the circle. The clip length follows from laps, radius and speed (2 to 10 s), so laps are capped to fit.' }),
+      side(), GROUND_PIN],
+  },
 ];
 
 function deepFreeze(o) {
@@ -252,7 +275,7 @@ function deepFreeze(o) {
   return o;
 }
 
-/** Every preset, in Motorica's order. */
+/** Every preset: Motorica's, in its order, then ours. */
 export const PRESETS = deepFreeze(DEFS);
 const BY_ID = new Map(PRESETS.map((d) => [d.id, d]));
 
@@ -308,6 +331,10 @@ function roundStep(v, step) {
 /** Largest multiple of step <= v (with a little float slack). */
 function floorStep(v, step) {
   return Number((Math.floor(v / step + 1e-9) * step).toFixed(decimals(step)));
+}
+/** Smallest multiple of step >= v (with a little float slack). */
+function ceilStep(v, step) {
+  return Number((Math.ceil(v / step - 1e-9) * step).toFixed(decimals(step)));
 }
 /** Clamps time param `key` of `p` to [its min, max], max rounded down to the 0.1 s grid. */
 function fitTime(p, id, key, max) {
@@ -583,7 +610,41 @@ const RECIPES = {
     endYaw: (p) => sign(p.side) * p.angle * DEG,
     prompt: (p) => `A person stands still and then ${turnWords(p.angle, p.side)}.`,
   },
+  circle: {
+    moving: true,
+    // Laps are capped so the clip is 60..300 frames; the result is stored as
+    // `duration`. T = round(laps * lap) + 1 fits for laps * lap in [58.5, 299.5).
+    fit(p) {
+      const lap = circleLapFrames(p);
+      const pd = presetById('circle').params.find((d) => d.key === 'laps');
+      const lo = Math.max(pd.min, ceilStep((MIN_FRAMES - 1.5) / lap, pd.step));
+      const hi = Math.min(pd.max, floorStep((MAX_FRAMES - 0.5) / lap, pd.step));
+      p.laps = clamp(p.laps, lo, Math.max(lo, hi));
+      p.duration = r6(clamp(Math.round(p.laps * lap) + 1, MIN_FRAMES, MAX_FRAMES) / FPS);
+    },
+    // Analytic circle closing exactly on the last frame (frame T-1 sweeps
+    // laps * 360 degrees), centre (s R, 0); the speed is p.speed to within the
+    // rounding of T (< 1%).
+    simulate(p) {
+      const T = framesOf(p);
+      const s = sign(p.side);
+      const step = (2 * Math.PI * p.laps) / (T - 1);
+      const v = step * p.radius * FPS;
+      const xz = [], heading = [], spd = [];
+      for (let f = 0; f < T; f++) {
+        const phi = step * f;
+        xz.push([s * p.radius * (1 - Math.cos(phi)) + 0, p.radius * Math.sin(phi)]); // + 0: no -0 on the right
+        heading.push(s * phi + 0);
+        spd.push(v);
+      }
+      return { frames: T, xz, heading, speed: spd };
+    },
+    prompt: (p) => `A person ${gaitVerb(p.speed)} in a circle to the ${p.side}.`,
+  },
 };
+
+/** Frames per lap of the circle preset (fractional). */
+const circleLapFrames = (p) => ((2 * Math.PI * p.radius) / p.speed) * FPS;
 
 const stopTurnWindow = (p) => [Math.round((p.moving + STOP_TURN_DELAY_S) * FPS), framesOf(p) - TURN_END_OFFSET];
 const spinWindow = (p) => [Math.round(p.first * FPS), Math.round((p.first + p.spin) * FPS)];
@@ -769,7 +830,9 @@ function presetWarnings(id, p, sim) {
   const out = [];
   const T = sim.frames;
   const speeds = ['speed', 'speed2'].filter((k) => k in p).map((k) => p[k]);
-  if (speeds.some((s) => s >= WALK_MAX)) {
+  if (id === 'circle') {
+    out.push(...circleWarnings(p));
+  } else if (speeds.some((s) => s >= WALK_MAX)) {
     out.push('Speeds of 2 m/s and above ask for a jog or run; jog/run quality is untested (the path tests used walking speeds).');
   }
   const recipe = RECIPES[id];
@@ -795,6 +858,24 @@ function presetWarnings(id, p, sim) {
   // (with endIdle on, buildPreset already warned that the end pins were left out)
   if ((id === 'stop' || id === 'stop_turn') && !p.endIdle && !(sim.speed[T - 1] < STOP_SPEED)) {
     out.push(`The stop does not finish within the clip (${sim.speed[T - 1].toFixed(2)} m/s at the end).`);
+  }
+  return out;
+}
+
+/** Run in a circle outside the envelope its GPU sweep passed (CIRCLE_* above). */
+function circleWarnings(p) {
+  const out = [];
+  const rate = (p.speed / p.radius) / DEG;
+  if (p.speed > CIRCLE_MAX_SPEED) {
+    out.push('Above 4 m/s the feet slide more: 3.3 to 7.8 cm per step at 5 m/s in tests, against at most 3.1 cm up to 4 m/s.');
+  }
+  if (rate > CIRCLE_MAX_RATE) {
+    out.push(`Tight circle for the speed (${Math.round(rate)}°/s): the body falls behind the path, up to 11° short of the turn at 115°/s in tests; `
+      + 'use a larger radius or a lower speed.');
+  }
+  if (p.speed >= CIRCLE_RUN_SPEED && p.radius > CIRCLE_MAX_RUN_RADIUS) {
+    out.push('Wide running circles can float: at 4 m/s a 6 m radius drifted up to 24 cm above the floor in tests (5 m and less stayed grounded); '
+      + 'use a radius of 5 m or less.');
   }
   return out;
 }
