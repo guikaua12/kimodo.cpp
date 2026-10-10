@@ -1,0 +1,198 @@
+{
+  "_doc": "Style library for factory.py. subject is spliced into prompt templates (no speed words: the path sets speed). speed = forward loop speed in m/s (other directions use clips.SPEED_FACTOR unless speed_factor overrides). signature = posture checks every loop must pass (metrics from skeleton.posture: pelvis_h_m, head_h_m, hands_dist_m, hands_h_m, hands_fwd_cm, arm_swing_cm, torso_pitch_deg); 'all' must all pass, at least one of 'any' must pass. Thresholds come from the 2026-10-09 measurements in docs/motion-stage-research/09-experiment-log.md. checks/similarity override factory defaults.",
+  "neutral": {
+    "label": "Neutral",
+    "subject": "a man",
+    "speed": 1.2,
+    "seed": 1,
+    "signature": {
+      "all": [
+        {
+          "metric": "arm_swing_cm",
+          "min": 8.0
+        },
+        {
+          "metric": "torso_pitch_deg",
+          "max": 10.0
+        }
+      ]
+    }
+  },
+  "zombie": {
+    "label": "Zombie",
+    "subject": "a zombie",
+    "speed": 0.8,
+    "seed": 1,
+    "signature": {
+      "any": [
+        {
+          "metric": "torso_pitch_deg",
+          "min": 12.0
+        },
+        {
+          "metric": "hands_h_m",
+          "min": 1.1
+        }
+      ]
+    }
+  },
+  "rifle": {
+    "label": "Rifle",
+    "subject": "a man holding a rifle",
+    "speed": 1.2,
+    "seed": 1,
+    "signature": {
+      "all": [
+        {
+          "metric": "hands_dist_m",
+          "max": 0.4
+        },
+        {
+          "metric": "arm_swing_cm",
+          "max": 4.0
+        },
+        {
+          "metric": "hands_h_m",
+          "min": 1.05
+        },
+        {
+          "metric": "hands_fwd_cm",
+          "min": 5.0
+        }
+      ]
+    }
+  },
+  "crouch": {
+    "label": "Crouch",
+    "subject": "a crouching man",
+    "speed": 0.9,
+    "seed": 1,
+    "signature": {
+      "all": [
+        {
+          "metric": "pelvis_h_m",
+          "max": 0.8
+        }
+      ]
+    },
+    "checks": {
+      "max_pelvis_m": 1.05
+    }
+  },
+  "old": {
+    "label": "OldMan",
+    "subject": "an old man hunched over",
+    "speed": 0.9,
+    "seed": 1,
+    "signature": {
+      "all": [
+        {
+          "metric": "torso_pitch_deg",
+          "min": 15.0
+        }
+      ]
+    }
+  },
+  "goblin": {
+    "label": "Goblin",
+    "subject": "a hunched goblin creature",
+    "speed": 1.0,
+    "seed": 1,
+    "signature": {
+      "all": [
+        {
+          "metric": "torso_pitch_deg",
+          "min": 20.0
+        }
+      ]
+    }
+  },
+  "rifle_low_ready": {
+    "label": "RifleLowReady",
+    "subject": "a man",
+    "speed": 1.1,
+    "seed": 2,
+    "_signature_doc": "checks run on the GENERATED (natural) low-ready carry: grip hand at chest/belly, support hand lower/forward/left, little swing, upright; the collapse is applied afterwards by carry_edit",
+    "signature": {
+      "all": [
+        {
+          "metric": "rhand_h_m",
+          "min": 1.05,
+          "max": 1.35
+        },
+        {
+          "metric": "handline_down_deg",
+          "min": 15.0
+        },
+        {
+          "metric": "handline_fwd_cm",
+          "min": 0.0
+        },
+        {
+          "metric": "handline_left_cm",
+          "min": 0.0
+        },
+        {
+          "metric": "hands_dist_m",
+          "min": 0.2,
+          "max": 0.5
+        },
+        {
+          "metric": "arm_swing_cm",
+          "max": 5.0
+        },
+        {
+          "metric": "torso_pitch_deg",
+          "max": 15.0
+        }
+      ]
+    },
+    "signature_on": [
+      "idle",
+      "loop",
+      "start",
+      "stop"
+    ],
+    "prompt_idle": "a man stands still looking straight ahead, holding a rifle in a low ready position with the muzzle pointed down",
+    "prompt_loop": "a man walks {dir} holding a rifle in a low ready position with the muzzle pointed down",
+    "prompt_start": "a man is standing still holding a rifle in a low ready position with the muzzle pointed down, then starts walking {dir}",
+    "prompt_stop": "a man walks {dir} holding a rifle in a low ready position with the muzzle pointed down, then stops and stands still",
+    "prompt_turn": "a man holding a rifle in a low ready position with the muzzle pointed down stands still and then turns {amount} to his {side}",
+    "hand_anchor": {
+      "pose_dir": "anchors/rifle_low_ready_natural",
+      "every": 8,
+      "_doc": "Kimodo's own low-ready carry (screening wording 0, seed 2, frame 51, upright); pinning it keeps the carry identical across clips without fighting the model"
+    },
+    "carry_edit": {
+      "right": [
+        0.0,
+        -0.18,
+        0.02
+      ],
+      "left": [
+        0.0,
+        -0.09,
+        -0.01
+      ],
+      "_doc": "collapse the carry at export with arm IK: grip hand -18 cm (belt height), support hand -9 cm (hip/thigh); spine and legs untouched"
+    },
+    "idle_signature": {
+      "all": [
+        {
+          "metric": "head_h_m",
+          "min": 1.52
+        },
+        {
+          "metric": "feet_width_cm",
+          "max": 42.0
+        },
+        {
+          "metric": "torso_pitch_deg",
+          "max": 8.0
+        }
+      ],
+      "_doc": "head up (walk loop head is 1.54 m), stance up to about shoulder width (36 cm measured), upright"
+    },
+    "idle_pelvis_h": 1.0
+  }
+}
