@@ -41,15 +41,28 @@
 // - Editing mode: the Editor (editing.js) owns the gizmos, the skeleton /
 //   opacity switch and the Smooth Path re-application on exit and after a
 //   ground-gizmo release; the app mirrors the options in the Visualize tab.
+// - Path presets (presets.js + the presets_ui.js dialog): applyPreset() turns a
+//   Built preset into one prompt segment, a preview motion (the anchor pose
+//   sliding along the path; nothing is generated yet), the preset's
+//   constraints (dense 2D root with headings + pose pins) and its settings
+//   (Post Processing on, root margin 0.06 m). Pose pins need SOMA-30, so it
+//   switches to an installed SOMA model first (else the path alone is sent).
+//   state.preset remembers the applied preset for the sidebar readout and
+//   "Edit"; selecting an animation from the gallery or switching skeletons
+//   forgets it (the animation our own Generate selects keeps it: the store
+//   still holds the preset's constraints). Applying cancels a gallery
+//   selection that is still loading.
 //
 // Debug handle for automated tests: window.__kimodo.
 
 import { Skeleton } from './skeleton.js';
 import { Motion } from './motion.js';
-import { ConstraintStore, TRACKS, TRACK_LABELS, TRACK_COLORS, WARN_FRAMES } from './constraints.js';
+import { ConstraintStore, TRACKS, TRACK_LABELS, TRACK_COLORS, WARN_FRAMES, validateModelJSON } from './constraints.js';
 import { Timeline, PROMPT_COLORS } from './timeline.js';
 import { Viewport } from './viewport.js';
 import { Editor } from './editing.js';
+import { buildPreset, previewBuffers } from './presets.js';
+import { PresetsDialog, presetReadout } from './presets_ui.js';
 
 const FPS = 30;
 const MIN_FRAMES = 60;
@@ -60,6 +73,9 @@ const DEFAULT_FRAMES = 180;
 const POLL_MS = 2500;
 const GALLERY_PAGE = 40;
 const VIS_KEY = 'kimodo.editor.visualize';
+/** Skeleton keys of the SOMA-30 control skeleton (path presets pin its poses). */
+const SOMA_KEYS = new Set(['soma30', 'somaskel30']);
+const PRESET_MODEL = 'soma-rp-v1.1';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -98,6 +114,7 @@ const state = {
   gallerySig: '',
   galleryLimit: GALLERY_PAGE,
   active: null,         // generation in flight {id, started}
+  preset: null,         // applied path preset {id, params, prompt, label} (null: none)
   editing: false,
   undoAvailable: false,
   visBeforeEdit: null,
@@ -109,6 +126,7 @@ const state = {
 let viewport = null;
 let editor = null;
 let timeline = null;
+let presetsDialog = null;
 let selectToken = 0;
 // What the RAF loop last pushed to the viewport / timeline.
 const seen = { motion: null, motionVersion: -1, frame: -1, store: null, storeVersion: -1, numFrames: -1, readoutFrames: -1 };
@@ -180,11 +198,13 @@ function setModel(entry) {
     state.store = newStore(state.skeleton);
     state.source = null;
     state.selected = null;
+    state.preset = null; // its constraints went with the old store
     // Skeleton first, then the motion built on it.
     if (viewport) viewport.setSkeleton(state.skeleton);
     else viewport = new Viewport($('viewport'), state.skeleton);
     setMotion(Motion.rest(state.skeleton, numFrames()));
     onStoreChange();
+    updatePresetReadout();
     updateDownload();
   }
   // G1: no post-processing (forced off upstream) and a Local-only gizmo.
@@ -607,6 +627,15 @@ async function selectAnimation(a, { loadConstraints = true, quiet = false, resto
   }
   if (token !== selectToken || state.active) return; // a newer selection or a generation won
   if (state.editing) exitEditing({ quiet: true });
+  // The working motion is a preset preview (not generated) until replaced.
+  const wasPreview = !state.selected && !!state.preset;
+  // Selecting from the gallery forgets the applied preset. Our own finished
+  // generation (loadConstraints false) keeps it: the store still holds exactly
+  // the preset's constraints, so its readout and "Edit" stay true.
+  if (loadConstraints) {
+    state.preset = null;
+    updatePresetReadout();
+  }
 
   setModel(entry);
   restoreParams(a, { all: restoreSettings });
@@ -627,6 +656,13 @@ async function selectAnimation(a, { loadConstraints = true, quiet = false, resto
     state.frame = 0;
     state.acc = 0;
     state.playing = true;
+  } else if (wasPreview) {
+    // A failed record has no motion: drop the preset preview (its label is
+    // gone with state.preset) and show the rest pose, as before presets.
+    state.source = null;
+    state.contactsFor = null;
+    setMotion(Motion.rest(state.skeleton, numFrames()));
+    state.frame = 0;
   }
   // Prompts after the motion: resizes the clone only if the record disagrees.
   setSegments(segments);
@@ -681,8 +717,10 @@ function updateDownload() {
   const a = state.selected;
   const link = $('download');
   link.hidden = !a;
-  $('selectedLabel').textContent = a ? animationText(a) : 'Rest pose · no animation selected';
-  $('selectedLabel').title = a ? `${a.id} · ${animationText(a)}` : '';
+  // No selected animation + an applied preset: the motion is the preset preview.
+  const preset = !a && state.preset;
+  $('selectedLabel').textContent = a ? animationText(a) : preset ? `Preset preview · ${preset.label} (not generated yet)` : 'Rest pose · no animation selected';
+  $('selectedLabel').title = a ? `${a.id} · ${animationText(a)}` : preset ? `${presetReadout(preset)} · ${preset.prompt}` : '';
   if (a) {
     link.href = `/api/animations/${encodeURIComponent(a.id)}/animation.glb`;
     link.download = `kimodo-${a.id}.glb`;
@@ -789,6 +827,111 @@ async function loadConstraintsFile(file) {
 }
 
 // ---------------------------------------------------------------------------
+// path presets
+// ---------------------------------------------------------------------------
+
+/** The installed SOMA-30 model presets switch to (soma-rp-v1.1 first), or null. */
+function presetModel() {
+  const soma = state.models.filter((m) => m.available && SOMA_KEYS.has(m.skeleton_key));
+  return soma.find((m) => m.id === PRESET_MODEL) ?? soma[0] ?? null;
+}
+
+/** Skeleton the dialog previews presets for: SOMA when it is current or installed. */
+function presetSkeletonKey() {
+  return state.skeleton?.key === 'soma30' || presetModel() ? 'soma30' : (state.skeleton?.key || 'soma30');
+}
+
+function updatePresetReadout() {
+  const p = state.preset;
+  $('presetApplied').hidden = !p;
+  $('presetReadout').textContent = p ? presetReadout(p) : '';
+  $('presetReadout').title = p ? p.prompt : '';
+  $('presetSummary').textContent = p ? p.label : '';
+}
+
+/**
+ * Loads a Built preset (presets.js buildPreset; `prompt` as edited in the
+ * dialog) into the editor: a SOMA model, a preview motion, one prompt segment,
+ * the preset's constraints and generation settings; then generates when asked.
+ * Returns false when refused (a generation is running) or on failure.
+ */
+function applyPreset(built, { generate: andGenerate = false } = {}) {
+  if (state.active) {
+    toast('Generation running', { body: 'Wait for the current generation to finish before applying a preset.', kind: 'warn' });
+    return false;
+  }
+  // A gallery selection still loading must not land on top of the preset.
+  selectToken++;
+  if (state.editing) exitEditing({ quiet: true });
+
+  // Pose pins need SOMA-30: switch models before any constraint is loaded.
+  if (state.skeleton?.key !== 'soma30' || !state.model?.available) {
+    const entry = presetModel();
+    if (entry && entry.id !== state.model?.id) {
+      setModel(entry);
+      toast('Model switched', { body: `Path presets pin poses of the SOMA skeleton; now using ${entry.label}.` });
+    } else if (state.skeleton?.key !== 'soma30') {
+      built = { ...buildPreset(built.id, built.params, { skeletonKey: state.skeleton.key }), prompt: built.prompt };
+      toast('No SOMA model installed', { body: 'Pose pins need the SOMA skeleton; this preset is sent as a path only.', kind: 'warn' });
+    }
+  }
+
+  // Everything that can fail before anything is replaced.
+  const T = built.frames;
+  let motion;
+  try {
+    const { local, root } = previewBuffers(built, state.skeleton);
+    motion = new Motion(state.skeleton, T, local, root);
+    validateModelJSON(built.constraints, state.skeleton);
+  } catch (err) {
+    toast('Could not apply the preset', { body: errorText(err), kind: 'error' });
+    return false;
+  }
+
+  // Preview motion (the anchor pose sliding along the path), then the prompt,
+  // the clip length and the constraints.
+  state.selected = null;
+  state.source = null;
+  state.contactsFor = null;
+  setMotion(motion);
+  setSegments([{ prompt: built.prompt, frames: T }]);
+  state.store.setNumFrames(T, state.motion);
+  try {
+    loadConstraintArray(built.constraints, { source: `preset ${built.label}`, quiet: true });
+  } catch (err) {
+    toast('Could not load the preset constraints', { body: errorText(err), kind: 'error' });
+    return false;
+  }
+
+  // The settings the presets were measured with (G1: Post Processing stays off).
+  const settings = built.settings ?? { post_processing: true, root_margin: 0.06 };
+  if (!isG1()) {
+    $('postProcessing').checked = settings.post_processing;
+    $('rootMargin').value = settings.root_margin;
+  }
+  params.summary();
+
+  state.preset = { id: built.id, params: { ...built.params }, prompt: built.prompt, label: built.label };
+  updatePresetReadout();
+  updateDownload();
+  renderGallery(true);
+  state.frame = 0;
+  setPlaying(true);
+
+  const hips = built.pins.filter((p) => p.kind === 'hips').length;
+  const idle = built.pins.filter((p) => p.kind === 'fullbody').length;
+  const pins = [hips ? `${hips} Hips pin${hips === 1 ? '' : 's'}` : '', idle ? `${idle} idle pose pin${idle === 1 ? '' : 's'}` : ''].filter(Boolean).join(' + ') || 'no pose pins';
+  const post = isG1() ? 'Post Processing off (G1)' : `Post Processing ${settings.post_processing ? 'on' : 'off'}, root margin ${settings.root_margin} m`;
+  toast(`${built.label} applied`, {
+    body: `${T} frames, constrained 2D root path with headings, ${pins}; ${post}. ${andGenerate ? 'Generating…' : 'The viewport shows a preview until you Generate.'}`,
+    kind: 'success',
+    timeout: 5000,
+  });
+  if (andGenerate) generate();
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // editing mode
 // ---------------------------------------------------------------------------
 
@@ -836,6 +979,7 @@ function updateButtons() {
   $('undoMove').disabled = !editing || !(editor?.canUndo ?? state.undoAvailable);
   $('model').disabled = editing || busy;
   $('modeBanner').hidden = !editing;
+  presetsDialog?.syncGenerate();
   updateSnap();
   updateHeadingRow();
 }
@@ -1033,6 +1177,17 @@ function wireUI() {
   });
   $('generate').addEventListener('click', generate);
 
+  // Path presets
+  presetsDialog = new PresetsDialog({
+    onApply: applyPreset,
+    canApply: () => !state.active,
+    canGenerate: () => !state.active && !state.editing,
+    skeletonKey: presetSkeletonKey,
+    keepVisible: [$('toasts')], // toasts stay readable above the modal
+  });
+  $('browsePresets').addEventListener('click', () => presetsDialog.open());
+  $('editPreset').addEventListener('click', () => presetsDialog.open(state.preset));
+
   // Constraints panel
   $('editMode').addEventListener('click', () => (state.editing ? exitEditing() : enterEditing()));
   $('snap').addEventListener('click', () => {
@@ -1119,6 +1274,8 @@ function wireUI() {
   for (const b of document.querySelectorAll('[data-speed-group] button')) b.addEventListener('click', () => setSpeed(Number(b.dataset.speed)));
   window.addEventListener('keydown', (e) => {
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || isTyping(e.target)) return;
+    // A modal dialog (path presets) owns the keyboard: Space must press its buttons.
+    if (document.querySelector('dialog[open]')) return;
     if (e.code === 'Space' || e.key === ' ') {
       e.preventDefault();
       if (!e.repeat) setPlaying(!state.playing);
@@ -1207,8 +1364,11 @@ window.__kimodo = {
   get editor() { return editor; },
   get timeline() { return timeline; },
   get store() { return state.store; },
+  get presets() { return presetsDialog; },
   setFrame,
   selectAnimation,
+  applyPreset,
+  buildPreset,
 };
 Object.defineProperty(window, '__kimodoEditor', { get: () => editor, configurable: true });
 

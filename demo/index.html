@@ -49,6 +49,18 @@
           </div>
         </details>
 
+        <details class="folder" id="presetsFolder" open>
+          <summary>Path presets <span class="summary-extra" id="presetSummary"></span></summary>
+          <div class="folder-body">
+            <button type="button" class="secondary" id="browsePresets" aria-haspopup="dialog">Browse presets…</button>
+            <div class="preset-applied" id="presetApplied" hidden>
+              <span class="readout" id="presetReadout"></span>
+              <button type="button" class="secondary small" id="editPreset" aria-haspopup="dialog" title="Reopen the applied preset with its parameters">Edit</button>
+            </div>
+            <div class="hint">Parametric paths (turns, starts, stops, strafes, spins) built as a 2D root path with a heading on every frame plus pose pins. Applying one replaces the prompts and constraints.</div>
+          </div>
+        </details>
+
         <details class="folder">
           <summary>Model parameters <span class="summary-extra" id="paramsSummary"></span></summary>
           <div class="folder-body">
@@ -186,6 +198,14 @@
           <li>Pick the motion model and options in the <b>Generate</b> tab and click <b>Generate</b>.</li>
           <li>Past animations restore their prompts, settings and constraints when selected (not while a generation runs). Settings an older animation did not record keep their current values.</li>
         </ul>
+        <h3>Path presets</h3>
+        <ul>
+          <li><b>Browse presets…</b> (Generate tab, <b>Path presets</b>) opens the parametric presets: Acceleration, Constant Speed, Strafe, Arc, Forward turn, Strafe turn, Start, Start turn, Stop, Stop turn, Spin and Turn in place. Search them, or switch between grid and list.</li>
+          <li>Pick one and set its speed, angle, side and timings (spring half-lives under <b>Dynamics</b>, pins under <b>Pose pins</b>). The top view updates live: filled dot = start, ring = end, triangles = facing every 0.5 s, 1 m grid, forward is up.</li>
+          <li><b>Apply</b> replaces the prompts with one segment and the constraints with a 2D Root path that has a heading on every frame, plus pose pins (Hips at frame 0 on moving starts, idle Full-Body poses on standing starts and ends). It turns Post Processing on with a 0.06 m root margin. The viewport shows a sliding preview pose until you <b>Generate</b>; <b>Apply &amp; Generate</b> does both.</li>
+          <li>The prompt is written from the parameters; edit it in the dialog or afterwards in the Prompts list. Presets marked <b>Experimental</b> (Strafe turn, Start turn, Stop turn, Spin) were checked on the GPU only at their defaults; expect more variation across seeds. The presets were measured with 100 steps and text/constraint CFG 2/2.</li>
+          <li>Pose pins need a SOMA model: Apply switches to one when it is installed (otherwise only the path is sent). <b>Edit</b> next to the applied preset reopens it with its parameters (it stays after Generate; selecting a past animation clears it).</li>
+        </ul>
         <h3>Constraints</h3>
         <ul>
           <li>Optional; usually added after a first generation.</li>
@@ -214,7 +234,7 @@
           <li><b>Full-Body</b>: the position of every joint.</li>
           <li><b>2D Root</b>: the path on the ground. <b>Make Smooth Path</b> turns the waypoints into a continuous path (anchored at the first and last frame).</li>
           <li><b>Hands / Feet</b>: the position of the wrist/ankle chain and the rotation of the wrist/ankle, one track per limb. Like Full-Body, a hand/foot keyframe also fixes the pelvis position on the ground, the hip height and the facing direction of the stored pose (the red root joint of its ghost); only the rest of the body is free.</li>
-          <li><b>Hips</b>: the pelvis position, hip height and pelvis rotation (so also the facing) of the stored pose, nothing else.</li>
+          <li><b>Hips</b>: the pelvis position, hip height and pelvis rotation (so also the facing) of the stored pose, nothing else. Path presets use it at frame 0 to ground the start of the path.</li>
         </ul>
         <h3>Editing mode</h3>
         <ul>

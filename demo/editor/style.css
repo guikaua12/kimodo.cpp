@@ -17,6 +17,7 @@
   --la-warn: #ffbf78;
   --la-danger: #ff6b6b;
   --la-blue: #4f9cf7;
+  --la-amber: #ffb547;   /* preset paths: a trajectory on black */
   --sidebar-w: 372px;
   /* timeline.js: header 35 + prompts 40 + 7 track rows (>= 20 px each) + 1 px border; 230 gives 22 px rows */
   --timeline-h: 230px;
@@ -338,10 +339,13 @@ button.small { padding: 5px 10px; font-size: .8rem; }
 .playbar .play svg { width: 14px; height: 14px; fill: currentColor; }
 .frame-readout { font-variant-numeric: tabular-nums; color: var(--la-text); font-size: .86rem; min-width: 160px; }
 .frame-readout small { color: var(--la-muted); }
-.speed { display: inline-flex; border: 1px solid var(--la-line); border-radius: 8px; overflow: hidden; }
-.speed button { border-radius: 0; background: transparent; color: var(--la-muted); box-shadow: none; padding: 6px 10px; font-weight: 600; }
-.speed button + button { border-left: 1px solid var(--la-line); }
-.speed button[aria-pressed="true"] { background: rgba(59, 211, 208, .16); color: var(--la-cyan-2); }
+/* Segmented toggles: playback speed, preset side / layout. */
+.speed, .seg-toggle { display: inline-flex; border: 1px solid var(--la-line); border-radius: 8px; overflow: hidden; }
+.speed button, .seg-toggle button { border-radius: 0; background: transparent; color: var(--la-muted); box-shadow: none; padding: 6px 10px; font-weight: 600; }
+.speed button + button, .seg-toggle button + button { border-left: 1px solid var(--la-line); }
+.speed button[aria-pressed="true"], .seg-toggle button[aria-pressed="true"] { background: rgba(59, 211, 208, .16); color: var(--la-cyan-2); }
+.seg-toggle button:not([aria-pressed="true"]):hover { color: var(--la-text); }
+.seg-toggle svg { display: block; width: 15px; height: 15px; fill: currentColor; }
 .spacer { flex: 1; }
 .selected-label { color: var(--la-muted); font-size: .8rem; max-width: 34ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .download { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; }
@@ -394,6 +398,144 @@ button.small { padding: 5px 10px; font-size: .8rem; }
   border-radius: 10px;
   z-index: 20;
   font-size: .86rem;
+}
+
+/* ----------------------------------------------------------- path presets */
+
+/* Sidebar: readout of the applied preset + Edit. */
+.preset-applied { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.preset-applied .readout { color: var(--la-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* presets_ui.js dialog: fits the window (1280x720 included) and scrolls inside.
+   `display` only when open: an author display would override the UA's hidden closed dialog. */
+.presets-dialog {
+  width: min(1120px, calc(100vw - 32px));
+  height: min(780px, calc(100vh - 32px));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 1px solid var(--la-line);
+  border-radius: 16px;
+  background: radial-gradient(circle at 12% 0, rgba(59, 211, 208, .1), transparent 30rem), var(--la-panel);
+  color: var(--la-text);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .6);
+  overflow: hidden;
+}
+.presets-dialog[open] { display: flex; flex-direction: column; }
+.presets-dialog:focus { outline: none; }
+.presets-dialog::backdrop { background: rgba(3, 6, 9, .72); backdrop-filter: blur(3px); }
+
+.pd-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 12px 14px 12px 18px; border-bottom: 1px solid var(--la-line); min-width: 0; }
+.pd-titles { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.pd-titles h2 { margin: 0; font-size: 1.15rem; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.pd-count { color: var(--la-muted); font-size: .82rem; font-variant-numeric: tabular-nums; }
+.pd-back { flex: none; }
+.pd-close { flex: none; font-size: 1.05rem; padding: 6px 10px; }
+
+.pd-browse, .pd-detail { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pd-toolbar { flex: none; display: grid; grid-template-columns: minmax(0, 360px) auto; justify-content: space-between; gap: 10px; align-items: center; padding: 12px 18px 10px; }
+.pd-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #2b3843 transparent; }
+.pd-pad { padding: 2px 18px 18px; }
+.pd-empty { margin: 24px 0; color: var(--la-muted); text-align: center; }
+
+/* Preset cards: grid (thumbnail + label) or list (small thumbnail + label + description). */
+.pd-items.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.pd-items.list { display: grid; gap: 6px; }
+.preset-card {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  text-align: left;
+  background: var(--la-panel-3);
+  border: 1px solid var(--la-line);
+  border-radius: 12px;
+  color: var(--la-text);
+  box-shadow: none;
+  font-weight: 400;
+  transition: border-color .12s, background-color .12s;
+}
+.preset-card:hover, .preset-card:focus-visible { border-color: var(--la-cyan); background: #111d24; }
+.preset-thumb { display: block; background: #05080b; border: 1px solid #1a242d; border-radius: 8px; overflow: hidden; }
+.preset-thumb .preset-svg { height: auto; }
+.pc-text { display: grid; gap: 3px; min-width: 0; }
+.pc-label { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-weight: 650; font-size: .9rem; line-height: 1.25; }
+.pc-desc { color: var(--la-muted); font-size: .8rem; line-height: 1.35; overflow-wrap: anywhere; }
+.pd-items.grid .pc-desc { display: none; }
+.pd-items.list .preset-card { grid-template-columns: 88px minmax(0, 1fr); align-items: center; gap: 12px; padding: 6px 12px 6px 6px; }
+.chip.experimental { border-color: rgba(255, 191, 120, .5); color: var(--la-warn); background: rgba(255, 191, 120, .08); font-weight: 600; }
+
+/* presetSVG output (colours are currentColor): a warm amber trajectory on black. */
+.preset-svg { display: block; width: 100%; height: 100%; color: var(--la-amber); }
+.preset-svg .preset-grid { color: #9fb3c2; }
+.preset-svg .preset-path, .preset-svg .preset-start, .preset-svg .preset-end { color: var(--la-amber); }
+.preset-svg .preset-facing { color: #ffd591; }
+
+/* Detail view: preview + summary on the left, the form and the prompt on the right. */
+.pd-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 400px); gap: 16px 22px; align-items: start; padding: 16px 18px 20px; }
+.pd-left { position: sticky; top: 0; display: grid; gap: 10px; min-width: 0; }
+.pd-right { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.pd-preview { height: min(360px, 46vh); min-height: 170px; background: #05080b; border: 1px solid #1a242d; border-radius: 12px; overflow: hidden; }
+.pd-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; color: var(--la-muted); font-size: .76rem; }
+.pd-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.pd-legend i { display: inline-block; flex: none; }
+.lg-start { width: 8px; height: 8px; border-radius: 50%; background: var(--la-amber); }
+.lg-end { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--la-amber); }
+.lg-facing { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 9px solid #ffd591; }
+.pd-summary { display: flex; flex-wrap: wrap; row-gap: 4px; color: var(--la-muted); font-size: .86rem; }
+.pd-stat b { color: var(--la-text); font-weight: 650; font-variant-numeric: tabular-nums; }
+.pd-stat + .pd-stat::before { content: '\00B7'; margin: 0 7px; color: #4b5a66; }
+.pd-pins { margin: 0; color: var(--la-muted); font-size: .8rem; line-height: 1.4; overflow-wrap: anywhere; }
+.pd-warnings {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 10px 8px 26px;
+  border: 1px solid rgba(255, 191, 120, .35);
+  border-radius: 10px;
+  background: rgba(255, 191, 120, .07);
+  color: var(--la-warn);
+  font-size: .8rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.pd-experimental { margin: 0; padding: 8px 10px; border: 1px dashed rgba(159, 122, 234, .5); border-radius: 10px; background: rgba(159, 122, 234, .08); color: #d7c9f7; font-size: .8rem; line-height: 1.4; }
+.pd-experimental b { color: var(--la-violet); }
+.pd-desc { margin: 0; color: #d6dee4; font-size: .9rem; line-height: 1.45; }
+.pd-form { display: grid; gap: 9px; min-width: 0; }
+.pd-form .slider-row { grid-template-columns: 124px minmax(0, 1fr) 66px; }
+.pd-field { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 8px; align-items: center; font-size: .84rem; }
+.pd-field > span { color: var(--la-muted); }
+.pd-field .seg-toggle { justify-self: start; }
+.pd-field select { padding: 6px 8px; }
+.pd-bool { display: grid; gap: 3px; }
+.pd-bool .hint { padding-left: 24px; }
+.pd-group > summary { padding: 8px 12px; font-size: .88rem; }
+.pd-prompt { display: grid; gap: 6px; }
+.pd-prompt-head { display: flex; align-items: baseline; gap: 8px; }
+.pd-prompt-head label { display: inline; font-weight: 650; }
+.pd-prompt-state { color: var(--la-muted); font-size: .74rem; }
+.pd-prompt-state.edited { color: var(--la-cyan-2); }
+.pd-prompt textarea { min-height: 64px; overflow: auto; resize: vertical; }
+.pd-prompt-foot { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.pd-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--la-line); background: rgba(11, 16, 21, .6); }
+.pd-foot-note { flex: 1; min-width: 0; color: var(--la-warn); font-size: .8rem; }
+
+@media (max-width: 860px) {
+  .pd-detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .pd-left { position: static; }
+  .pd-preview { height: min(300px, 42vh); }
+}
+@media (max-width: 520px) {
+  .presets-dialog { width: calc(100vw - 16px); height: calc(100vh - 16px); border-radius: 12px; }
+  .pd-toolbar, .pd-pad, .pd-detail-grid { padding-left: 12px; padding-right: 12px; }
+  .pd-items.grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .pd-form .slider-row { grid-template-columns: 96px minmax(0, 1fr) 60px; }
+  .pd-field { grid-template-columns: 96px minmax(0, 1fr); }
 }
 
 @media (max-width: 900px) {

@@ -172,6 +172,19 @@ The page follows NVIDIA's Kimodo demo:
   Constraint are available.
 - **Make Smooth Path** turns the 2D Root waypoints into a dense, smoothed root
   path anchored at the first and last frame.
+- **Path presets** (*Browse presets…*) opens a "Parametric presets"dialog 
+  with 12 presets: Acceleration, Constant Speed, Strafe, Constant speed/Arc, 
+  Forward turn, Strafe turn, Start, Start turn, Stop, Stop turn, Spin and Turn in place. 
+  Each preset has a few parameters (speed, angle, side, timings, spring half-lives) and a live top-down preview.
+  Apply turns it into constraints: a 2D Root path with a heading on every frame
+  (simulated with critically damped springs), a Hips pin at frame 0 against
+  floating starts, SOMA idle-pose pins for starts, stops and in-place turns,
+  a matching prompt, Post Processing on and root margin 0.06. The constraints
+  land on the timeline like any others, so they can be edited before
+  generating. The pose pins need a SOMA model; Apply switches to one when it
+  is installed. Apply leaves the seed, steps and CFG weights alone; the
+  presets were measured with 100 steps and CFG 2/2
+  ([experiment log](docs/motion-stage-research/09-experiment-log.md)).
 - **Save / Load Constraints** read and write the official Kimodo
   `constraints.json`. SOMA files are written with the 30 control joints, like
   the shipped SOMA examples; 77-joint files saved by the official demo are
@@ -192,8 +205,8 @@ Deviations from the upstream demo:
   30-joint control skeleton's FK, like upstream's CLI. The Hugging Face demo
   uses 77-joint FK, so `*HandMiddleEnd` differs there by a few centimetres.
 - G1 motions are never post-processed, like upstream.
-- The Hips track is an addition; upstream's demo has none (its
-  `constraints.json` format already allows a Hips end-effector).
+- The Hips track and the path presets are additions; upstream's demo has
+  neither (its `constraints.json` format already allows a Hips end-effector).
 
 Editor development notes (serving it from the checkout with `-web-dir demo`,
 the viewport harness, module overview) are in
