@@ -18,11 +18,15 @@ the model actually predicts. The text encoder uses eight-layer Vulkan chunks by
 default; set `KIMODO_TEXT_LAYER_CHUNK=1..32` to tune VRAM use.
 
 Included: checked GGUF loading, safetensors conversion, DDIM sampling, C/C++
-APIs, conditioned multi-prompt transitions, CPU/Vulkan parity tests,
-skeleton-only GLB export, selective LLM2Vec quantisation, divergence reporting,
-and local generation/comparison viewers. General constraint input, 77-joint
-SOMA expansion, skinned-mesh GLB export, and motion-denoiser quantisation are
-not implemented yet.
+APIs, conditioned multi-prompt transitions, kinematic constraints (full-body
+keyframes, hand/foot end-effectors, 2D root waypoints and paths with optional
+heading) with upstream `constraints.json` import/export, NVIDIA MotionCorrection
+post-processing (x86/x86-64 only: the solver needs SSE4.1; configure with
+`-DKIMODO_ENABLE_POSTPROCESS=OFF` to leave it out), CPU/Vulkan parity tests,
+skeleton-only GLB export, selective LLM2Vec quantisation, divergence
+reporting, and local generation/comparison viewers. 77-joint SOMA output
+expansion, skinned-mesh GLB export, and motion-denoiser quantisation are not
+implemented yet.
 
 ## Build and test on Linux
 
@@ -72,6 +76,40 @@ beside `tokenizer.gguf` or the legacy component directory. Use
 4096 F32 values or `kimodo_generate` for text. Both return the selected model's
 root translations and local XYZW rotations; query the joint count from the
 result rather than assuming a fixed skeleton.
+
+## Constraints
+
+Constraints use NVIDIA Kimodo's `constraints.json` format: a JSON array of
+`root2d`, `fullbody`, `left-hand`, `right-hand`, `left-foot`, `right-foot` and
+`end-effector` objects with global 30 fps `frame_indices`, axis-angle
+`local_joints_rot` on the model's control skeleton (SOMA files with 77 joints
+are reduced to the 30 predicted joints), pelvis `root_positions` and optional
+`smooth_root_2d`/`global_root_heading`. Files saved by the official demo or CLI
+load unchanged; see `tests/data/constraints` for examples and
+[`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md#constraints) for the exact
+semantics. `kmd-generate` takes one JSON request:
+
+```sh
+cat > request.json <<'JSON'
+{"output": "out/walk", "seed": 43, "steps": 100, "transition_frames": 5,
+ "text_cfg": 2.0, "constraint_cfg": 2.0, "post_processing": true,
+ "root_margin": 0.04,
+ "segments": [{"frames": 150, "prompt": "A person walks forward and picks something up"}],
+ "constraints_file": "tests/data/constraints/soma_03_full_body_keyframes.json"}
+JSON
+build/debug/kmd-generate models/kimodo-soma-rp-v1.1-f32.gguf Llama-3-Kimodo-Q8_0.gguf \
+  --request request.json
+```
+
+It writes `root_positions.f32` [T,3], `local_rotations_xyzw.f32` [T,J,4],
+`foot_contacts.f32` [T,4] and `smooth_root.f32` [T,3] (little-endian float32).
+The same object (with `"constraints": [...]` inline if preferred) drives
+`kimodo_generate_request` in the C API, `model::parse_request` plus
+`model::generate` in C++, and JSON lines of `kmd-generate --server`. Omitted
+fields keep their defaults; post-processing defaults to off in the API and is
+never applied to G1, like upstream. In a build without the post-processor
+(`kimodo_post_processing_available()` returns 0) a request that sets it fails
+before any sampling.
 
 ## Demo
 
