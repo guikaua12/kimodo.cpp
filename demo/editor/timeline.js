@@ -1,5 +1,6 @@
 // Canvas timeline for the constraint editor: frame ruler + playhead, the
-// Prompts row (one block per text segment) and the six constraint tracks.
+// Prompts row (one block per text segment) and the seven constraint tracks
+// (constraints.js TRACKS; the Hips row is ours, upstream has six).
 // Port of the kimodo-viser timeline widget used by the upstream NVIDIA Kimodo
 // demo (src/viser/client/src/Timeline.tsx, timeline/draw.ts, styles.ts);
 // gestures and limits as in the upstream demo (kimodo/demo/ui.py timeline callbacks).
@@ -55,7 +56,7 @@ export const PROMPT_COLORS = Object.freeze([
 // Geometry (CSS pixels). Upstream: ruler 35, prompt row 40, tracks 40 * 0.5.
 const HEADER_H = 35;
 const PROMPT_H = 40;
-const TRACK_H_MIN = 20;          // track rows grow to fill the container (max 28)
+const TRACK_H_MIN = 20;          // track rows grow to fill the container (max 28); 7 rows need >= 215 px
 const LABEL_W = 96;          // track label column
 const PAD_L = 12;            // gap between the label column and frame 0 (room for a keyframe dot)
 const PAD_R = 14;
@@ -83,6 +84,10 @@ const C = {
   warn: '#ffb04c',
   preview: 'rgba(59, 211, 208, 0.9)',
 };
+
+// Tooltip notes: what a keyframe of an end-effector track holds beyond its joints.
+const LIMB_NOTE = 'also holds the pelvis position, hip height and facing of the stored pose';
+const HIPS_NOTE = 'pins the pelvis position, hip height and pelvis rotation of the stored pose';
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const rgba = (c, a) => `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${a})`;
@@ -624,6 +629,7 @@ export class Timeline {
       const n = this.data.counts?.[t];
       if (x < LABEL_W) {
         title = `${TRACK_LABELS[t]}${n !== undefined ? `: ${n} constrained frame${n === 1 ? '' : 's'}` : ''}`;
+        if (t === 'hips') title += ` — ${HIPS_NOTE}`;
         if (this.data.warnings?.[t]) title += t === 'root2d'
           ? ' (20+ waypoints: fewer keyframes usually work better; dense paths are fine)'
           : ' (20+ frames: fewer than 20 constrained frames per type usually work better)';
@@ -631,8 +637,9 @@ export class Timeline {
         const it = this.hover.hit.item;
         const n = this.data.numFrames;
         title = `${TRACK_LABELS[t]} @ ${it.start === it.end ? it.start : `[${it.start}, ${it.end}]`}`;
-        // A hand/foot keyframe holds the whole stored pose's root as well.
-        if (t !== 'fullbody' && t !== 'root2d') title += ' (also holds the pelvis position, hip height and facing of the stored pose)';
+        // A hand/foot keyframe holds the whole stored pose's root as well; a Hips keyframe pins exactly that.
+        if (t === 'hips') title += ` (${HIPS_NOTE})`;
+        else if (t !== 'fullbody' && t !== 'root2d') title += ` (${LIMB_NOTE})`;
         if (it.start >= n) title += ` — past the end of the clip (frame ${n - 1}): kept, but not sent; drag it back or lengthen the clip`;
         else if (it.end >= n) title += ` — frames after ${n - 1} are past the end of the clip and not sent`;
       }

@@ -189,7 +189,7 @@
         <h3>Constraints</h3>
         <ul>
           <li>Optional; usually added after a first generation.</li>
-          <li><b>Click</b> a timeline track (Full-Body, 2D Root, hands, feet) to add a keyframe at that frame. The constraint is a snapshot of the character shown in the viewport at that frame.</li>
+          <li><b>Click</b> a timeline track (Full-Body, 2D Root, hands, feet, Hips) to add a keyframe at that frame. The constraint is a snapshot of the character shown in the viewport at that frame.</li>
           <li><b>Right-click</b> a constraint to delete it.</li>
           <li>To <b>edit</b> a constraint: move the playhead to its frame and click <b>Enter Editing Mode</b>.</li>
         </ul>
@@ -214,6 +214,7 @@
           <li><b>Full-Body</b>: the position of every joint.</li>
           <li><b>2D Root</b>: the path on the ground. <b>Make Smooth Path</b> turns the waypoints into a continuous path (anchored at the first and last frame).</li>
           <li><b>Hands / Feet</b>: the position of the wrist/ankle chain and the rotation of the wrist/ankle, one track per limb. Like Full-Body, a hand/foot keyframe also fixes the pelvis position on the ground, the hip height and the facing direction of the stored pose (the red root joint of its ghost); only the rest of the body is free.</li>
+          <li><b>Hips</b>: the pelvis position, hip height and pelvis rotation (so also the facing) of the stored pose, nothing else.</li>
         </ul>
         <h3>Editing mode</h3>
         <ul>
@@ -232,7 +233,7 @@
         <h3>Visualization</h3>
         <ul>
           <li>The Visualize tab toggles the mesh, skeleton, foot contacts, labels and the starting-direction arrow.</li>
-          <li>Constraint ghosts: Full-Body poses are drawn with yellow joints and red bones; for hands and feet the constrained joints and bones (and the root) are red and the rest of the pose is grey, for reference only.</li>
+          <li>Constraint ghosts: Full-Body poses are drawn with yellow joints and red bones; for hands and feet the constrained joints and bones (and the root) are red and the rest of the pose is grey, for reference only. A <b>Hips</b> pin draws the stored pose in grey with a larger red root joint, axes at the root and a red line from the pelvis down to the ground (labelled “Hips @ frame”).</li>
         </ul>
       </section>
     </div>

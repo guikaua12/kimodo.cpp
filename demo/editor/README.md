@@ -12,7 +12,7 @@ Each module's header documents its API, conventions and deviations from upstream
 | `skeleton.js` | `Skeleton` from an `/api/models` entry: FK, `localFromGlobals`, `restPose`, `heading`, chains/hips, hidden gizmo joints |
 | `motion.js` | `Motion`: per-frame local rotations + root with cached FK and editing helpers (`setJointGlobalRotation`, ...) |
 | `smooth_root.js` | exact port of upstream `smooth_signal` / `get_smooth_root_pos` (ADMM multigrid, banded Cholesky) |
-| `constraints.js` | `ConstraintStore`: the six timeline tracks, write-through, Make Smooth Path, `toModelJSON` / `loadModelJSON` |
+| `constraints.js` | `ConstraintStore`: the seven timeline tracks (upstream's six plus Hips, a generic `end-effector` on the root joint), write-through, Make Smooth Path, `toModelJSON` / `loadModelJSON` |
 | `soma77.js` | SOMA77 names and the 30-from-77 slice for importing 77-joint constraint files |
 
 Each file's header lists its conventions and the deliberate deviations from upstream.
@@ -23,7 +23,7 @@ Each file's header lists its conventions and the deliberate deviations from upst
 |---|---|
 | `viewport.js` | three.js view: mannequin, skeleton overlay, constraint ghosts / waypoints / paths, labels |
 | `editing.js` | Editing mode: joint rotate gizmos, root ground gizmo, heading handle, undo / reset / snap |
-| `timeline.js` | Canvas timeline: ruler + playhead, Prompts row, six constraint tracks and their gestures |
+| `timeline.js` | Canvas timeline: ruler + playhead, Prompts row, seven constraint tracks and their gestures |
 | `app.js` | Page shell for `index.html`: sidebar tabs, generation requests, gallery, playback, wiring |
 | `style.css` | Page styles (LocalAI house style) |
 

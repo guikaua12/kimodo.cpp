@@ -6,9 +6,9 @@
 // upstream constraints.json format documented in docs/IMPLEMENTATION.md).
 //
 // Model
-// - Six timeline tracks (TRACKS) backed by three per-frame slot maps, like upstream:
+// - Seven timeline tracks (TRACKS) backed by three per-frame slot maps, like upstream:
 //     fullbody: frame -> {pose, ids[], smoothRoot2d}
-//     ee:       frame -> {pose, entries[{id, track}], smoothRoot2d}   (shared by the 4 limb tracks)
+//     ee:       frame -> {pose, entries[{id, track}], smoothRoot2d}   (shared by the 4 limb tracks and Hips)
 //     root2d:   frame -> {x, z, heading: [cos, sin] | null, ids[]}
 //   `pose` = {local: Float32Array(J*4) xyzw, root: Float32Array(3)} plus derived
 //   {positions, globals} (FK, computed when stored). Timeline items
@@ -16,10 +16,15 @@
 //   writes one slot entry per frame, all sharing its id. A keyframe and an
 //   interval on the same frame share one slot (last add wins); a slot is freed
 //   when its id list is empty.
+// - EE_TRACKS are the tracks of the ee map. 'hips' is an end-effector track
+//   like the limbs (same slot, snapshot, write-through, snap, counts) but has no
+//   chain in Skeleton#chains: it pins the root joint (pelvis position, hip
+//   height and pelvis rotation, hence also the facing) and is saved as the
+//   generic {type: 'end-effector', joint_names: ['Hips']} object.
 // - Adding snapshots the motion at the target frame(s), not at the playhead:
-//   the full pose for Full-Body / limb tracks, the pelvis (x, z) for 2D Root.
-//   Two limb tracks on one frame merge into one EE slot (union of types, pose
-//   overwritten by the latest snapshot).
+//   the full pose for Full-Body / limb / Hips tracks, the pelvis (x, z) for 2D
+//   Root. Two EE tracks on one frame merge into one EE slot (union of types,
+//   pose overwritten by the latest snapshot).
 // - move() = remove + re-snapshot at the destination (upstream). Option
 //   carryPose keeps the stored data instead: a same-length move shifts it, a
 //   resize keeps it on frames that were already covered and snapshots new ones.
@@ -29,8 +34,18 @@
 //   over every 2D-Root entry, then get_smooth_root_pos when there are >= 3.
 //
 // Deliberate deviations from upstream (documented port decisions):
-// - Removing one limb from a shared EE frame recomputes the limb types from the
-//   remaining ids (upstream EEJointsKeyframeSet only recomputed joint_names).
+// - The Hips track. Upstream's timeline only exposes the four limbs, although
+//   its generic end-effector (expand_joint_names), the Go server and the engine
+//   accept 'Hips'. Here a generic end-effector may list any non-empty subset of
+//   LeftHand, RightHand, LeftFoot, RightFoot, Hips; each listed joint routes the
+//   object's frames to its track (Hips -> 'hips'; it used to be dropped).
+//   toModelJSON writes one object per track (same frames, same pose), so a
+//   mixed ['LeftHand', 'Hips'] file comes back as a 'left-hand' object plus
+//   {type: 'end-effector', joint_names: ['Hips'], frame_indices,
+//   local_joints_rot, root_positions, smooth_root_2d}: the same conditions for
+//   the model.
+// - Removing one limb (or Hips) from a shared EE frame recomputes the EE types
+//   from the remaining ids (upstream EEJointsKeyframeSet only recomputed joint_names).
 // - Timeline edits are clamped to [0, numFrames-1]; add outside the range is
 //   rejected (returns null); move/resize is clamped (upstream silently dropped).
 // - setNumFrames keeps every constraint (like upstream set_new_duration):
@@ -50,7 +65,9 @@
 // - Moving a 2D-Root item keeps its headings (they are not part of the pelvis
 //   snapshot).
 // - toModelJSON emits frame_indices in ascending order (upstream: dict insertion
-//   order; the model treats them as a set) and 30 joints for SOMA.
+//   order; the model treats them as a set) and 30 joints for SOMA. Object
+//   order: fullbody, EE tracks (limbs and Hips, by first constrained frame),
+//   root2d.
 // - Store methods never mutate the motion except setSmoothPath(true) (unless
 //   {applyToMotion: false}), applyDensePath() and snapToConstraint().
 //
@@ -64,24 +81,31 @@ import { quatFromAxisAngle, quatToAxisAngle } from './math.js';
 import { smoothPathXZ } from './smooth_root.js';
 import { SOMA30_FROM_77, isSoma30 } from './soma77.js';
 
-export const TRACKS = Object.freeze(['fullbody', 'root2d', 'left-hand', 'right-hand', 'left-foot', 'right-foot']);
-export const EE_TRACKS = Object.freeze(['left-hand', 'right-hand', 'left-foot', 'right-foot']);
+export const TRACKS = Object.freeze(['fullbody', 'root2d', 'left-hand', 'right-hand', 'left-foot', 'right-foot', 'hips']);
+/** Tracks stored in the shared End-Effector slot map (the four limbs and Hips). */
+export const EE_TRACKS = Object.freeze(['left-hand', 'right-hand', 'left-foot', 'right-foot', 'hips']);
 export const TRACK_LABELS = Object.freeze({
   fullbody: 'Full-Body', root2d: '2D Root',
   'left-hand': 'Left Hand', 'right-hand': 'Right Hand', 'left-foot': 'Left Foot', 'right-foot': 'Right Foot',
+  hips: 'Hips',
 });
-/** Upstream timeline colours (kimodo/demo/ui.py:99-171; FB == left foot, 2D root == right foot upstream). */
+/**
+ * Upstream timeline colours (kimodo/demo/ui.py:99-171; FB == left foot, 2D root
+ * == right foot upstream). Hips (no upstream track) gets its own coral.
+ */
 export const TRACK_COLORS = Object.freeze({
   fullbody: [219, 148, 86], root2d: [150, 100, 200],
   'left-hand': [100, 200, 150], 'right-hand': [200, 100, 150], 'left-foot': [219, 148, 86], 'right-foot': [150, 100, 200],
+  hips: [232, 92, 80],
 });
 /** Soft limit: >= this many constrained frames per type degrades results (upstream docs, limitations). */
 export const WARN_FRAMES = 20;
 /** Every `type` accepted by upstream load_constraints_lst (TYPE_TO_CLASS). */
 export const CONSTRAINT_TYPES = Object.freeze(['root2d', 'fullbody', 'left-hand', 'right-hand', 'left-foot', 'right-foot', 'end-effector']);
 
-const EE_JOINT_TRACK = Object.freeze({ LeftHand: 'left-hand', RightHand: 'right-hand', LeftFoot: 'left-foot', RightFoot: 'right-foot' });
-const EE_JOINT_NAMES = new Set([...Object.keys(EE_JOINT_TRACK), 'Hips']);
+/** Generic end-effector joint name -> track (upstream expand_joint_names base names). */
+const EE_JOINT_TRACK = Object.freeze({ LeftHand: 'left-hand', RightHand: 'right-hand', LeftFoot: 'left-foot', RightFoot: 'right-foot', Hips: 'hips' });
+const EE_JOINT_NAMES = new Set(Object.keys(EE_JOINT_TRACK));
 const isEE = (track) => EE_TRACKS.includes(track);
 const sortedKeys = (map) => [...map.keys()].sort((a, b) => a - b);
 
@@ -465,8 +489,9 @@ export class ConstraintStore extends EventTarget {
 
   /**
    * The constraints.json array the model receives (compute_model_constraints_lst
-   * + save format): frames >= numFrames dropped; objects ordered fullbody, limb
-   * types (first occurrence), root2d.
+   * + save format): frames >= numFrames dropped; objects ordered fullbody, EE
+   * tracks (first occurrence; 'hips' as a generic end-effector with
+   * joint_names ['Hips']), root2d.
    */
   toModelJSON(numFrames = this.numFrames) {
     const N = numFrames ?? Infinity;
@@ -485,7 +510,7 @@ export class ConstraintStore extends EventTarget {
         groups.get(t).push(f);
       }
     }
-    for (const [type, frames] of groups) out.push(this._poseObject(type, frames, this._ee, smoothAt));
+    for (const [track, frames] of groups) out.push(this._poseObject(track, frames, this._ee, smoothAt));
 
     const rootFrames = dense ? dense.map((p, f) => (p ? f : -1)).filter((f) => f >= 0) : sortedKeys(this._root).filter((f) => f < N);
     const xzAt = (f) => (dense ? [dense[f][0], dense[f][1]] : [this._root.get(f).x, this._root.get(f).z]);
@@ -669,11 +694,12 @@ export class ConstraintStore extends EventTarget {
     else this._smooth.band = this._addBand(this.numFrames);
   }
 
-  _poseObject(type, frames, map, smoothAt) {
+  /** Pose object of one track; 'hips' is written as {type: 'end-effector', joint_names: ['Hips'], ...}. */
+  _poseObject(track, frames, map, smoothAt) {
     const J = this.skeleton.J;
     const aa = [0, 0, 0];
     return {
-      type,
+      ...(track === 'hips' ? { type: 'end-effector', joint_names: ['Hips'] } : { type: track }),
       frame_indices: frames.slice(),
       local_joints_rot: frames.map((f) => {
         const local = map.get(f).pose.local;
@@ -778,13 +804,13 @@ export function validateModelJSON(array, skeleton) {
     // fullbody / limb / generic end-effector
     let tracks;
     if (type === 'end-effector') {
+      // Any non-empty subset of the five names; the object's frames go to every listed track.
       const names = obj.joint_names;
       if (!Array.isArray(names) || names.length === 0) fail('joint_names', 'is required for end-effector constraints');
       names.forEach((n, k) => {
         if (!EE_JOINT_NAMES.has(n)) fail(`joint_names[${k}]`, `unknown joint ${JSON.stringify(n)} (expected ${[...EE_JOINT_NAMES].join(', ')})`);
       });
       tracks = Object.keys(EE_JOINT_TRACK).filter((n) => names.includes(n)).map((n) => EE_JOINT_TRACK[n]);
-      if (tracks.length === 0) fail('joint_names', 'needs at least one of LeftHand, RightHand, LeftFoot, RightFoot');
     } else {
       tracks = [type];
     }

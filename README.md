@@ -150,9 +150,10 @@ The page follows NVIDIA's Kimodo demo:
   contacts, labels and starting direction. *Instructions* explains the editor.
 - **Timeline.** The Prompts row holds one block per text segment: drag a
   boundary or the last edge to change durations, Shift+click to split,
-  right-click to delete or merge, double-click to edit the text. Six tracks
-  hold the constraints: **Full-Body**, **2D Root**, **Left/Right Hand** and
-  **Left/Right Foot**. Click a track to add a keyframe snapshotted from the
+  right-click to delete or merge, double-click to edit the text. Seven tracks
+  hold the constraints: **Full-Body**, **2D Root**, **Left/Right Hand**,
+  **Left/Right Foot** and **Hips** (a generic `end-effector` on the root
+  joint: it pins the pelvis position, hip height and pelvis rotation). Click a track to add a keyframe snapshotted from the
   displayed motion (keep the button held to drag it), Ctrl/Cmd-drag to add an
   interval or stretch an item, drag to move, right-click to delete. A hand or
   foot keyframe also fixes the pelvis position, hip height and facing of its
@@ -186,6 +187,8 @@ Deviations from the upstream demo:
   30-joint control skeleton's FK, like upstream's CLI. The Hugging Face demo
   uses 77-joint FK, so `*HandMiddleEnd` differs there by a few centimetres.
 - G1 motions are never post-processed, like upstream.
+- The Hips track is an addition; upstream's demo has none (its
+  `constraints.json` format already allows a Hips end-effector).
 
 Editor development notes (serving it from the checkout with `-web-dir demo`,
 the viewport harness, module overview) are in

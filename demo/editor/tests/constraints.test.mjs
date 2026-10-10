@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { Skeleton } from '../skeleton.js';
 import { Motion } from '../motion.js';
-import { ConstraintStore, TRACKS, TRACK_LABELS, EE_TRACKS, WARN_FRAMES, validateModelJSON } from '../constraints.js';
+import { ConstraintStore, TRACKS, TRACK_LABELS, TRACK_COLORS, EE_TRACKS, WARN_FRAMES, validateModelJSON } from '../constraints.js';
 import { quatFromAxisAngle, quatToMatrix, mat3FromAxisAngle } from '../math.js';
 import { SOMA30_FROM_77 } from '../soma77.js';
 import { SOMA30_MODEL } from './fixtures/soma30.mjs';
@@ -34,9 +34,14 @@ const sameSnapshot = (pose, motion, f) => {
 };
 
 test('track constants', () => {
-  assert.deepEqual(TRACKS, ['fullbody', 'root2d', 'left-hand', 'right-hand', 'left-foot', 'right-foot']);
+  // The six upstream tracks keep their order (timeline rows); Hips is appended.
+  assert.deepEqual(TRACKS, ['fullbody', 'root2d', 'left-hand', 'right-hand', 'left-foot', 'right-foot', 'hips']);
+  assert.deepEqual(EE_TRACKS, ['left-hand', 'right-hand', 'left-foot', 'right-foot', 'hips']);
   assert.equal(TRACK_LABELS.root2d, '2D Root');
   assert.equal(TRACK_LABELS['left-hand'], 'Left Hand');
+  assert.equal(TRACK_LABELS.hips, 'Hips');
+  for (const t of TRACKS) assert.ok(TRACK_LABELS[t] && TRACK_COLORS[t]?.length === 3, t);
+  for (const t of TRACKS.filter((t) => t !== 'hips')) assert.notDeepEqual(TRACK_COLORS.hips, TRACK_COLORS[t], `hips colour differs from ${t}`);
   assert.equal(WARN_FRAMES, 20);
 });
 
@@ -410,7 +415,7 @@ test('loadModelJSON: own export round trip, runs -> intervals, one change event'
   const summary = other.loadModelJSON(JSON.parse(JSON.stringify(json)), m);
   assert.equal(events, 1);
   assert.equal(summary.objects, 4);
-  assert.deepEqual(summary.frames, { fullbody: 5, root2d: 7, 'left-hand': 0, 'right-hand': 1, 'left-foot': 1, 'right-foot': 0 });
+  assert.deepEqual(summary.frames, { fullbody: 5, root2d: 7, 'left-hand': 0, 'right-hand': 1, 'left-foot': 1, 'right-foot': 0, hips: 0 });
   assert.deepEqual(other.items().map((i) => [i.track, i.start, i.end]),
     [['fullbody', 4, 4], ['fullbody', 10, 13], ['root2d', 0, 5], ['root2d', 40, 40], ['right-hand', 30, 30], ['left-foot', 30, 30]]);
   const back = other.toModelJSON(50);
@@ -437,16 +442,23 @@ test('loadModelJSON: unsorted frames, generic end-effector, 77-joint SOMA, kept 
   ];
   const store = new ConstraintStore(sk);
   store.loadModelJSON(doc, m);
-  assert.deepEqual(store.items().map((i) => [i.track, i.start, i.end]), [['fullbody', 8, 8], ['left-hand', 4, 6], ['right-foot', 4, 6]]);
-  assert.deepEqual([...store.entriesAt(5).ee.types].sort(), ['left-hand', 'right-foot']);
+  // Hips is kept (it used to be dropped): the object's frames go to all three of its tracks.
+  assert.deepEqual(store.items().map((i) => [i.track, i.start, i.end]), [['fullbody', 8, 8], ['left-hand', 4, 6], ['right-foot', 4, 6], ['hips', 4, 6]]);
+  assert.deepEqual([...store.entriesAt(5).ee.types].sort(), ['hips', 'left-hand', 'right-foot']);
   close(store.entriesAt(4).ee.pose.root, [0, 1, 0.1], 1e-7, 'data stays paired with its frame');
   // the 77-joint pose equals the 30-joint pose (non-control joints discarded)
   const fb = store.entriesAt(8).fullbody;
   for (let j = 0; j < J; j++) close(quatToMatrix(fb.local.subarray(4 * j, 4 * j + 4)), mat3FromAxisAngle(pose30[j]), 1e-6);
   const out = store.toModelJSON(20);
-  assert.equal(out[0].type, 'fullbody');
+  assert.deepEqual(out.map((o) => o.type), ['fullbody', 'left-hand', 'right-foot', 'end-effector']);
   assert.equal(out[0].local_joints_rot[0].length, 30, 'exports the 30-joint control skeleton');
   assert.deepEqual(out[0].smooth_root_2d, [[1.05, 1.95]], 'file smooth_root_2d kept');
+  // The Hips part is saved as its own generic end-effector: same frames and pose as the limbs.
+  assert.deepEqual(out[3].joint_names, ['Hips']);
+  assert.deepEqual(out[3].frame_indices, [4, 5, 6]);
+  assert.deepEqual(out[3].root_positions, [[0, 1, 0.1], [0, 1, 0.2], [0, 1, 0]].map((r) => r.map(Math.fround)));
+  assert.deepEqual(out[3].local_joints_rot, out[1].local_joints_rot);
+  assert.deepEqual(out[3].smooth_root_2d, out[2].smooth_root_2d);
   // re-snapshot at that frame drops the override
   store.writeThrough(8, m);
   const s = m.snapshot(8);
@@ -480,8 +492,9 @@ test('loadModelJSON validates and leaves the store untouched on error', () => {
     [[{ type: 'root2d', frame_indices: [0, 1], smooth_root_2d: [[0, 0]] }], /smooth_root_2d.*2 rows/],
     [[{ type: 'root2d', frame_indices: [0], smooth_root_2d: [[0, 'a']] }], /finite number/],
     [[{ ...good, type: 'end-effector' }], /joint_names.*required/],
-    [[{ ...good, type: 'end-effector', joint_names: ['Hips'] }], /at least one of LeftHand/],
+    [[{ ...good, type: 'end-effector', joint_names: [] }], /joint_names.*required/],
     [[{ ...good, type: 'end-effector', joint_names: ['left_hand'] }], /unknown joint "left_hand"/],
+    [[{ ...good, type: 'end-effector', joint_names: ['Hips', 'Pelvis'] }], /joint_names\[1\].*unknown joint "Pelvis" \(expected LeftHand, RightHand, LeftFoot, RightFoot, Hips\)/],
   ];
   for (const [doc, re] of cases) {
     assert.throws(() => store.loadModelJSON(doc, m), re, JSON.stringify(doc).slice(0, 80));
@@ -489,6 +502,8 @@ test('loadModelJSON validates and leaves the store untouched on error', () => {
   assert.equal(store.items().length, 1, 'store unchanged');
   assert.ok(store.entriesAt(1).fullbody);
   assert.doesNotThrow(() => validateModelJSON([good], sk));
+  // A Hips-only generic end-effector is valid now (the Go server and the engine accept it).
+  assert.deepEqual(validateModelJSON([{ ...good, type: 'end-effector', joint_names: ['Hips'] }], sk).map((r) => r.tracks), [['hips']]);
 });
 
 test('snapToConstraint priority Full-Body -> End-Effectors -> 2D Root', () => {

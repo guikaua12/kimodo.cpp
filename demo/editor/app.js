@@ -1044,7 +1044,10 @@ function wireUI() {
       toast('Snap failed', { body: errorText(err), kind: 'error' });
       return;
     }
-    if (kind) toast('Snapped to constraint', { body: typeof kind === 'string' ? `Pose copied from the ${kind === 'ee' ? 'end-effector' : kind === 'root2d' ? '2D root' : 'full-body'} constraint at frame ${state.frame}.` : '' });
+    // An End-Effector slot holding only a Hips pin is named like its viewport label.
+    const eeTypes = kind === 'ee' ? state.store.entriesAt(state.frame).ee?.types : null;
+    const eeName = eeTypes && eeTypes.size === 1 && eeTypes.has('hips') ? 'Hips' : 'end-effector';
+    if (kind) toast('Snapped to constraint', { body: typeof kind === 'string' ? `Pose copied from the ${kind === 'ee' ? eeName : kind === 'root2d' ? '2D root' : 'full-body'} constraint at frame ${state.frame}.` : '' });
   });
   $('resetPose').addEventListener('click', () => {
     try {

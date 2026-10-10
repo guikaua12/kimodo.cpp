@@ -18,7 +18,8 @@
   --la-danger: #ff6b6b;
   --la-blue: #4f9cf7;
   --sidebar-w: 372px;
-  --timeline-h: 210px;
+  /* timeline.js: header 35 + prompts 40 + 7 track rows (>= 20 px each) + 1 px border; 230 gives 22 px rows */
+  --timeline-h: 230px;
   font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-size: 14px;
   background: var(--la-bg);

@@ -13,10 +13,14 @@
 //   showContacts the foot joints in contact turn red;
 // - every constraint of a ConstraintStore: Full-Body ghosts (yellow
 //   joints, red bones), End-Effector ghosts (grey skeleton, red root + chain,
-//   RGB axes at the chain base), 2D-Root waypoints (red sphere + annulus, plus
-//   an arrow for the optional heading), red polylines for 2D-Root intervals and
-//   the Smooth Path, CSS2D labels ("Full-Body @ f", "End-Effectors @ f",
-//   "2D Root @ f", "<Name> @ [s, e]"), and the blue start-direction marker.
+//   RGB axes at the chain base), Hips pins (the same ghost; the Hips track has
+//   no chain, so the root itself is marked: a larger red root joint, RGB axes
+//   at the root for the pinned pelvis rotation and a red drop line to the
+//   ground for the pinned hip height), 2D-Root waypoints (red sphere +
+//   annulus, plus an arrow for the optional heading), red polylines for 2D-Root
+//   intervals and the Smooth Path, CSS2D labels ("Full-Body @ f",
+//   "End-Effectors @ f", "Hips @ f" when Hips is the only End-Effector track at
+//   f, "2D Root @ f", "<Name> @ [s, e]"), and the blue start-direction marker.
 //
 // Constraint overlays are rebuilt only when the store changes ('change' event,
 // with store.version as a fallback), when numFrames or the overlay options
@@ -80,6 +84,8 @@ const SKEL_BONE_R = 0.01;
 const FINGER_SCALE = 0.6;
 const AXES_LEN = 0.07;
 const AXES_R = 0.007;
+const HIPS_ROOT_SCALE = 1.7; // Hips pin: root joint drawn larger than the ghost joints
+const HIPS_AXES_LEN = 0.14; // ... with a larger triad (the pelvis sits inside the mannequin)
 const WAYPOINT_SPHERE_R = 0.025;
 const WAYPOINT_RING_OUTER = 0.2; // annulus 0.10-0.20
 const ARROW_LEN = 0.3;
@@ -302,6 +308,7 @@ function injectStyle() {
   border: 1px solid #2c3a45; border-radius: 4px; padding: 1px 6px; white-space: nowrap; pointer-events: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, .45); letter-spacing: .01em; }
 .kimodo-label.root2d { border-color: rgba(255, 70, 70, .55); }
+.kimodo-label.hips { border-color: rgba(232, 92, 80, .6); }
 .kimodo-label.interval { color: #cfe7ee; border-style: dashed; }
 `;
   document.head.appendChild(style);
@@ -309,7 +316,7 @@ function injectStyle() {
 
 // CSS2DObject.center: (0.5, 0.5) centres the element on the point; y = 1 puts
 // the element's bottom edge on it.
-const ANCHOR = { center: [0.5, 0.5], bottomCenter: [0.5, 1], bottomLeft: [0, 1] };
+const ANCHOR = { center: [0.5, 0.5], bottomCenter: [0.5, 1], bottomLeft: [0, 1], topCenter: [0.5, 0] };
 
 // ---------------------------------------------------------------------------
 // Viewport
@@ -871,13 +878,13 @@ export class Viewport {
   }
 
   /** RGB axes triad (upstream add_batched_axes) at joint j of a stored pose. */
-  _axes(pose, j) {
+  _axes(pose, j, len = AXES_LEN) {
     const P = pose.positions, G = pose.globals;
     _q.set(G[4 * j], G[4 * j + 1], G[4 * j + 2], G[4 * j + 3]);
     const x = P[3 * j], y = P[3 * j + 1], z = P[3 * j + 2];
     const axis = new THREE.Vector3();
     [[1, 0, 0, COL.axisX], [0, 1, 0, COL.axisY], [0, 0, 1, COL.axisZ]].forEach(([ax, ay, az, c]) => {
-      axis.set(ax, ay, az).applyQuaternion(_q).multiplyScalar(AXES_LEN);
+      axis.set(ax, ay, az).applyQuaternion(_q).multiplyScalar(len);
       this._ghostSegments.push(segmentMatrix(x, y, z, x + axis.x, y + axis.y, z + axis.z, AXES_R), c);
     });
   }
@@ -936,22 +943,35 @@ export class Viewport {
     }
 
     // End-Effector ghosts: grey skeleton, red root + chain joints and chain bones, axes at the chain base.
+    // Hips (no chain in Skeleton#chains) marks the root itself: larger joint, axes, drop line to the ground.
     const ee = new Map();
+    const eeTypes = new Map(); // frame -> Set of EE tracks (label text)
     for (const e of store.entries('ee')) {
       ee.set(e.frame, e.pose);
+      eeTypes.set(e.frame, e.types);
       if (!vis(e.frame)) continue;
       const redJoints = new Set([root]);
       const redBones = new Set();
       const axesAt = [];
+      let hips = false;
       for (const track of EE_TRACKS) {
         if (!e.types.has(track)) continue;
+        if (track === 'hips') { hips = true; continue; }
         const chain = sk.chainForTrack(track);
         chain.forEach((j, k) => { redJoints.add(j); if (k > 0) redBones.add(j); });
         if (chain.length > 1) axesAt.push(chain[0]);
       }
       this._ghost(e.pose, (j) => (redJoints.has(j) ? COL.eeRed : COL.eeGrey), (j) => (redBones.has(j) ? COL.eeRed : COL.eeGrey));
       for (const j of new Set(axesAt)) this._axes(e.pose, j);
+      if (hips) {
+        const P = e.pose.positions;
+        const x = P[3 * root], y = P[3 * root + 1], z = P[3 * root + 2];
+        this._ghostSpheres.push(sphereMatrix(x, y, z, SKEL_JOINT_R * HIPS_ROOT_SCALE), COL.eeRed);
+        this._ghostSegments.push(segmentMatrix(x, y, z, x, 0, z, AXES_R), COL.eeRed);
+        this._axes(e.pose, root, HIPS_AXES_LEN);
+      }
     }
+    const eeOnlyHips = (f) => { const t = eeTypes.get(f); return !!t && t.size === 1 && t.has('hips'); };
 
     // 2D Root entries (frame -> {x, z, heading}).
     const rootEntries = new Map();
@@ -1003,17 +1023,21 @@ export class Viewport {
           if (mid) this._label(`ri:${s}:${e}`, `2D Root @ [${s}, ${e}]`, mid.x, 0, mid.z, ANCHOR.center, 'interval');
         }
       } else {
-        // limb tracks share one End-Effectors entry per frame
+        // EE tracks (limbs and Hips) share one End-Effectors entry per frame:
+        // one keyframe label per frame, "Hips @ f" when Hips is its only track.
         if (single) {
           if (!vis(s) || !ee.has(s) || eeKeyLabels.has(s)) continue;
           eeKeyLabels.add(s);
           const [x, y, z] = rootAt(ee.get(s));
-          this._label(`ee:${s}`, `End-Effectors @ ${s}`, x, y + 0.05, z, ANCHOR.bottomCenter);
+          const hipsOnly = eeOnlyHips(s);
+          this._label(`ee:${s}`, `${hipsOnly ? 'Hips' : 'End-Effectors'} @ ${s}`, x, y + 0.05, z, ANCHOR.bottomCenter, hipsOnly ? 'hips' : '');
         } else if (!only) {
           const pose = nearestPose(ee, s, e);
           if (!pose) continue;
           const [x, y, z] = rootAt(pose);
-          this._label(`eei:${s}:${e}`, `End-Effectors @ [${s}, ${e}]`, x, y, z, ANCHOR.center, 'interval');
+          // A Hips interval label sits below the pelvis so it does not cover a limb interval's label.
+          if (track === 'hips') this._label(`hipsi:${s}:${e}`, `Hips @ [${s}, ${e}]`, x, y - 0.05, z, ANCHOR.topCenter, 'interval hips');
+          else this._label(`eei:${s}:${e}`, `End-Effectors @ [${s}, ${e}]`, x, y, z, ANCHOR.center, 'interval');
         }
       }
     }
