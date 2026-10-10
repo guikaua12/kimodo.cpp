@@ -119,6 +119,11 @@ After building the debug preset and downloading the native GGUF bundle:
 go run ./demo -addr 0.0.0.0:8094
 ```
 
+On Windows, `start-kimodo-web.cmd` in the repository root starts the
+`build-win` server (`build-win\kimodo-demo.exe -generator
+build-win\kmd-generate.exe`) on `http://127.0.0.1:8094` and opens the
+browser; close its window to stop the server.
+
 Open `http://localhost:8094` for the web constraint editor described below.
 Generated animations are kept in `demo-output/` and listed under "Past
 animations". Every successful animation also writes a standalone
