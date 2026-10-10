@@ -24,9 +24,9 @@ heading) with upstream `constraints.json` import/export, NVIDIA MotionCorrection
 post-processing (x86/x86-64 only: the solver needs SSE4.1; configure with
 `-DKIMODO_ENABLE_POSTPROCESS=OFF` to leave it out), CPU/Vulkan parity tests,
 skeleton-only GLB export, selective LLM2Vec quantisation, divergence
-reporting, and local generation/comparison viewers. 77-joint SOMA output
-expansion, skinned-mesh GLB export, and motion-denoiser quantisation are not
-implemented yet.
+reporting, a local web constraint editor and comparison viewer. 77-joint SOMA
+output expansion, skinned-mesh GLB export, and motion-denoiser quantisation
+are not implemented yet.
 
 ## Build and test on Linux
 
@@ -119,10 +119,9 @@ After building the debug preset and downloading the native GGUF bundle:
 go run ./demo -addr 0.0.0.0:8094
 ```
 
-Open `http://localhost:8094`. The left sidebar contains the prompt and a
-persistent history plus motion-model and text-encoder-quantization selectors;
-choosing a previous animation restores its prompt and encoder choice for a new
-generation. Every successful animation also writes a standalone
+Open `http://localhost:8094` for the web constraint editor described below.
+Generated animations are kept in `demo-output/` and listed under "Past
+animations". Every successful animation also writes a standalone
 `animation.glb` beside its raw streams, for example
 `demo-output/<animation-id>/animation.glb`. It contains the selected animated
 node hierarchy (no mesh), ready to copy into a Three.js project. It is also
@@ -139,6 +138,59 @@ The demo reuses one native worker while the selected motion model and text
 quantization remain unchanged, preserving both weight sets across requests.
 Profiling controls, measurements, and the next optimization targets are in
 [`docs/PROFILING.md`](docs/PROFILING.md).
+
+### Web constraint editor
+
+The page follows NVIDIA's Kimodo demo:
+
+- **Tabs.** *Generate* holds the motion model, text-encoder quantization,
+  prompt segments, seed, diffusion steps, text and constraint CFG weights,
+  transition frames, Post Processing (with its root margin), the constraint
+  panel and the past animations. *Visualize* toggles the mesh, skeleton, foot
+  contacts, labels and starting direction. *Instructions* explains the editor.
+- **Timeline.** The Prompts row holds one block per text segment: drag a
+  boundary or the last edge to change durations, Shift+click to split,
+  right-click to delete or merge, double-click to edit the text. Six tracks
+  hold the constraints: **Full-Body**, **2D Root**, **Left/Right Hand** and
+  **Left/Right Foot**. Click a track to add a keyframe snapshotted from the
+  displayed motion (keep the button held to drag it), Ctrl/Cmd-drag to add an
+  interval or stretch an item, drag to move, right-click to delete. A hand or
+  foot keyframe also fixes the pelvis position, hip height and facing of its
+  stored pose. Constraints past the end of a shortened clip are kept (drawn
+  faded) but not sent.
+- **Editing Mode** shows the skeleton: click a joint for its rotation gizmo
+  (Local or World space), drag the ground gizmo under the character to move
+  the whole pose (W/E switch the hips between moving and rotating), and set an
+  optional facing direction on a 2D Root waypoint. Edits update the
+  constraints at that frame; Reset Constraint, Undo Move and Snap to
+  Constraint are available.
+- **Make Smooth Path** turns the 2D Root waypoints into a dense, smoothed root
+  path anchored at the first and last frame.
+- **Save / Load Constraints** read and write the official Kimodo
+  `constraints.json`. SOMA files are written with the 30 control joints, like
+  the shipped SOMA examples; 77-joint files saved by the official demo are
+  accepted.
+- **Post Processing** (foot-skate cleanup and exact constraint enforcement) is
+  on by default and hidden for G1 models.
+- Selecting a past animation restores its prompts, model, settings and
+  constraints. Settings an older animation did not record (CFG weights, Post
+  Processing, root margin) keep their current values.
+- Tips: keep fewer than 20 constrained frames per constraint type (dense 2D
+  root paths are fine) and at most 10 s per prompt.
+
+Deviations from the upstream demo:
+
+- There is no CFG-enable checkbox: the engine always runs separated text and
+  constraint CFG, so only the two weights are exposed.
+- SOMA hand-end joints (`*HandMiddleEnd`, `*HandThumbEnd`) are placed with the
+  30-joint control skeleton's FK, like upstream's CLI. The Hugging Face demo
+  uses 77-joint FK, so `*HandMiddleEnd` differs there by a few centimetres.
+- G1 motions are never post-processed, like upstream.
+
+Editor development notes (serving it from the checkout with `-web-dir demo`,
+the viewport harness, module overview) are in
+[`demo/editor/README.md`](demo/editor/README.md). The demo's tests run with
+`go test ./demo` and `node --test demo/editor/tests/`.
 
 Quantisation comparisons produced by the workflow in
 [`docs/QUANTIZATION.md`](docs/QUANTIZATION.md) can be opened at

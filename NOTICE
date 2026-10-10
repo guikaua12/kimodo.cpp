@@ -56,3 +56,7 @@ SuperLU 3.1, whose notice follows:
   Permission to modify the code and to distribute modified code is
   granted, provided the above notices are retained, and a notice that
   the code was modified is included with the above copyright notice.
+
+The demo's constraint editor includes three.js r170 (https://threejs.org),
+Copyright 2010-2024 three.js authors, MIT License; source and license in
+demo/assets/three.

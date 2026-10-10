@@ -1,21 +1,261 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Kimodo text to motion</title>
-<style>
-:root{color-scheme:dark;font-family:Inter,system-ui,sans-serif;background:#10131b;color:#f2f5fb}body{margin:0;overflow:hidden;background:#10131b}main{width:100vw;height:100vh;display:grid;grid-template-columns:360px minmax(0,1fr)}.sidebar{padding:24px 18px;display:flex;flex-direction:column;gap:18px;overflow-y:auto;overflow-x:hidden;background:radial-gradient(circle at 0 0,#293b62,transparent 32rem),#141a27;border-right:1px solid #2b354b}h1{font-size:2rem;letter-spacing:-.05em;margin:0}.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.14em;color:#9bb8ff;margin-bottom:8px}.card{background:#171c28dd;border:1px solid #2b354b;border-radius:14px;overflow:hidden}.stage{min-width:0;min-height:0;display:flex;flex-direction:column;background:#0c1019}canvas{display:block;width:100%;height:100%;flex:1;min-height:0;background:linear-gradient(#111b31,#0c1019);cursor:grab;touch-action:none}canvas.dragging{cursor:grabbing}.controls{padding:14px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid #2b354b}.promptbox{padding:16px;display:grid;gap:10px}.promptbox textarea{min-height:110px;resize:none;overflow:hidden}textarea,input{box-sizing:border-box;width:100%;border:1px solid #35415b;border-radius:10px;background:#0d121d;color:#f2f5fb;padding:10px;font:inherit}button,.download{border:0;border-radius:999px;padding:10px 16px;background:#9bb8ff;color:#10131b;font:inherit;font-weight:700;cursor:pointer;text-decoration:none}button:disabled{opacity:.5;cursor:wait}.download{background:#24313a;color:#dce9e8}.readout,.hint{color:#a9b3c8;font-size:.88rem}.gallery{padding:4px;display:grid;gap:8px;align-content:start}.history{flex:none;min-height:0;overflow:visible}.gallery h2{font-size:1rem;margin:8px}.item{width:100%;background:#101622;border:1px solid #2c3750;border-radius:12px;padding:11px;text-align:left;color:#e8eefc}.item:hover,.item.active{border-color:#9bb8ff;background:#19233a}.item p{margin:0 0 6px;font-size:.88rem;line-height:1.35}.status{font-size:.75rem;color:#a9b3c8}.error{color:#ffacac;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.camera{flex:1 1 100%;color:#a9b3c8;font-size:.82rem}.progress{display:inline-flex;align-items:center;gap:7px;color:#d9e5ff;font-weight:600}.progress::before{content:'';width:8px;height:8px;border-radius:50%;background:#9bb8ff;box-shadow:0 0 0 0 #9bb8ff;animation:pulse 1.25s infinite}@keyframes pulse{70%{box-shadow:0 0 0 8px #9bb8ff00}}.item.running{border-color:#739cf7}@media(max-width:850px){body{overflow:auto}main{height:auto;min-height:100vh;grid-template-columns:1fr}.sidebar{overflow:visible}.stage{height:min(70vh,700px)}}
-/* LocalAI house style: dark graphite surfaces with a cyan/violet edge. */
-:root{--la-bg:#080b0f;--la-panel:#10151b;--la-panel-2:#151c23;--la-line:#25313b;--la-text:#f3f6f4;--la-muted:#8b9aa5;--la-cyan:#3bd3d0;--la-cyan-2:#5ee6be;--la-violet:#9f7aea}body{background:var(--la-bg);color:var(--la-text)}.sidebar{background:radial-gradient(circle at 18% 0,rgba(59,211,208,.12),transparent 26rem),var(--la-panel);border-color:var(--la-line);box-sizing:border-box;min-height:0;min-width:0}.card{background:var(--la-panel-2);border-color:var(--la-line)}.stage{background:#090d12}canvas{background:radial-gradient(circle at 50% 25%,#102632 0,#090d12 56%)}.eyebrow{color:var(--la-cyan);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.product-title{display:flex;align-items:center;gap:11px}.product-mark{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:linear-gradient(135deg,var(--la-cyan),#218eac 55%,var(--la-violet));color:#051013;font-size:20px;font-weight:900;box-shadow:0 0 28px rgba(59,211,208,.2)}.localai-logo{position:fixed;top:18px;right:18px;z-index:2;width:56px;height:56px;object-fit:contain;filter:drop-shadow(0 5px 16px #0009)}.promptbox label,.gallery h2{color:var(--la-text)}textarea,input{border-color:var(--la-line);background:#0b1015}button{background:linear-gradient(135deg,var(--la-cyan),var(--la-cyan-2));color:#051013;border-radius:8px;box-shadow:0 8px 22px rgba(59,211,208,.12)}.history,.gallery,#items{min-width:0}.item{background:#0b1015;border-color:var(--la-line);box-sizing:border-box;min-width:0;white-space:normal;overflow-wrap:anywhere}.item:hover,.item.active{border-color:var(--la-cyan);background:#111d24}.status,.readout,.hint,.camera{color:var(--la-muted)}.progress{color:var(--la-cyan-2)}.progress::before{background:var(--la-cyan);box-shadow:0 0 0 0 var(--la-cyan)}.item.running{border-color:var(--la-cyan)}
-</style><main><aside class="sidebar"><header><div class="eyebrow">Kimodo-SMPLX-RP-v1 · Vulkan</div><div class="product-title"><span class="product-mark">K</span><h1>Text to motion</h1></div></header><section class="card promptbox"><label for="prompt">Describe a motion</label><textarea id="prompt">A person runs forward and then leaps over an obstacle in front of them.</textarea><button id="generate">Generate motion</button><span id="status" class="readout">Ready</span><div class="hint">One generation runs at a time. Select an animation below to restore and edit its prompt.</div></section><section class="card history"><div class="gallery"><h2>Past animations</h2><div id="items" class="readout">Loading…</div></div></section></aside><section class="stage"><canvas id="view" width="1280" height="720" aria-label="Animated SMPL-X skeleton"></canvas><div class="controls"><button id="play">Pause</button><button id="reset">Reset view</button><a id="download" class="download" hidden download>Download GLB</a><input id="frame" type="range" min="0" value="0" step="1"><span id="frameText" class="readout"></span><span class="camera">Camera tracks motion · Drag: rotate · wheel: zoom · Shift/right-drag: pan · double-click: reset</span></div></section></main><img class="localai-logo" src="/localai.png" alt="LocalAI">
-<style>.promptbox,.history{flex:0 0 auto}.license-warning{color:#ffbf78!important;font-weight:650}.download{display:inline-flex;align-items:center;gap:7px;background:linear-gradient(135deg,var(--la-cyan),var(--la-cyan-2));color:#051013;box-shadow:0 8px 22px rgba(59,211,208,.18)}.download::before{content:'\2193';font-size:1.15em;line-height:1}</style>
-<script src="/models.js"></script><script>
-let parents=[-1,0,0,0,1,2,3,4,5,6,7,8,9,9,9,12,13,14,16,17,18,19];
-// SMPL-X22 rest offsets calibrated from the captured upstream posed-joint /
-// global-rotation fixture. The generator persists local rotations and root
-// translations; these fixed parent-local bone vectors make them viewable here.
-let offsets=[[0,0,0],[.052299,-.093936,-.027607],[-.057193,-.106548,-.022218],[-.001496,.11293,-.024981],[.058867,-.416442,-.006557],[-.048074,-.39756,-.014061],[.0069,.145636,-.006859],[-.041738,-.437584,-.029512],[.014489,-.446853,-.01803],[-.010334,.056082,.021116],[.049294,-.065279,.126259],[-.040575,-.065287,.127076],[-.011026,.171365,-.028827],[.047725,.087643,-.008375],[-.046636,.086612,-.014864],[.024654,.175391,.024463],[.126285,.05768,-.013885],[-.109342,.053674,-.009118],[.272907,-.069853,-.039094],[-.292029,-.03544,-.024565],[.276174,.021254,-.002478],[-.271878,-.004835,-.016445]];
-window.addEventListener('kimodo:restore-sequence',event=>{const id=event.detail?.model||'smplx-rp-v1',model=window.kimodoModels?.find(item=>item.id===id);if(model?.parents?.length&&model.offsets?.length===model.parents.length){parents=model.parents;offsets=model.offsets}});
-const canvas=document.querySelector('#view'),ctx=canvas.getContext('2d'),slider=document.querySelector('#frame'),promptBox=document.querySelector('#prompt'),generate=document.querySelector('#generate'),status=document.querySelector('#status'),items=document.querySelector('#items'),download=document.querySelector('#download');let selected,root,rotations,frame=0,playbackBlend=0,playing=true,last=0,cameraLast=0,animations=[],activeRequest,activeStarted;const defaultView={yaw:-.68,pitch:-.20,zoom:2700,panX:0,panY:0,cameraX:0,cameraZ:0,cameraZoom:2700,cameraSpeed:0},view={...defaultView};window.addEventListener('kimodo:sequence-controls-ready',()=>{if(selected)window.dispatchEvent(new CustomEvent('kimodo:restore-sequence',{detail:{segments:selected.segments,model:selected.model,text_quantization:selected.text_quantization}}))});
-function renderedRoot(){if(!selected||!root)return[0,0,0];const at=frame*3,next=((frame+1)%selected.frames)*3,b=playbackBlend;return[root[at]*(1-b)+root[next]*b,root[at+1]*(1-b)+root[next+1]*b,root[at+2]*(1-b)+root[next+2]*b]}function snapCamera(){const[x,,z]=renderedRoot();view.cameraX=x;view.cameraZ=z;view.cameraZoom=view.zoom;view.cameraSpeed=0;cameraLast=performance.now()}function reset(){Object.assign(view,defaultView);snapCamera();draw()}function updateCamera(now){if(!selected||!root)return;const dt=Math.min(.1,Math.max(0,(now-cameraLast)/1000));cameraLast=now;const at=frame*3,next=((frame+1)%selected.frames)*3,[rootX,,rootZ]=renderedRoot(),speed=playing?Math.hypot(root[next]-root[at],root[next+2]-root[at+2])*30:0,dx=rootX-view.cameraX,dz=rootZ-view.cameraZ,distance=Math.hypot(dx,dz),deadZone=.18;const targetX=distance>deadZone?rootX-dx/distance*deadZone:view.cameraX,targetZ=distance>deadZone?rootZ-dz/distance*deadZone:view.cameraZ,follow=1-Math.exp(-3*dt),speedFollow=1-Math.exp(-2.4*dt),zoomFollow=1-Math.exp(-2.6*dt);view.cameraSpeed+=(speed-view.cameraSpeed)*speedFollow;const targetZoom=view.zoom*(1-Math.min(.22,view.cameraSpeed*.035));view.cameraX+=(targetX-view.cameraX)*follow;view.cameraZ+=(targetZ-view.cameraZ)*follow;view.cameraZoom+=(targetZoom-view.cameraZoom)*zoomFollow}function rotate(q,v){const[x,y,z,w]=q,[vx,vy,vz]=v,tx=2*(y*vz-z*vy),ty=2*(z*vx-x*vz),tz=2*(x*vy-y*vx);return[vx+w*tx+y*tz-z*ty,vy+w*ty+z*tx-x*tz,vz+w*tz+x*ty-y*tx]};function add(a,b){return[a[0]+b[0],a[1]+b[1],a[2]+b[2]]}function multiply(a,b){const[x,y,z,w]=a,[X,Y,Z,W]=b;return[x*W+w*X+y*Z-z*Y,y*W+w*Y+z*X-x*Z,z*W+w*Z+x*Y-y*X,w*W-x*X-y*Y-z*Z]}
-function pose(){if(!selected||!root||!rotations)return[];const positions=[],global=[],rootPosition=renderedRoot(),joints=parents.length;for(let j=0;j<joints;j++){const q=Array.from(rotations.subarray((frame*joints+j)*4,(frame*joints+j+1)*4)),p=parents[j];if(p<0){global[j]=q;positions[j]=rootPosition}else{global[j]=multiply(global[p],q);positions[j]=add(positions[p],rotate(global[p],offsets[j]))}}return positions}function project([x,y,z]){x-=view.cameraX;z-=view.cameraZ;const rx=x*Math.cos(view.yaw)-z*Math.sin(view.yaw),rz=x*Math.sin(view.yaw)+z*Math.cos(view.yaw),ry=y*Math.cos(view.pitch)-rz*Math.sin(view.pitch),dz=y*Math.sin(view.pitch)+rz*Math.cos(view.pitch)+8;return[canvas.width/2+view.panX+view.cameraZoom*rx/dz,canvas.height*.78+view.panY-view.cameraZoom*ry/dz]}
-function ground(){const cx=0,cz=0,step=.5,initialExtent=6,drawGrid=(extent,alpha,colour,width)=>{ctx.globalAlpha=alpha;ctx.strokeStyle=colour;ctx.lineWidth=width;for(let i=-extent/step;i<=extent/step;i++){let a=project([cx-extent,0,cz+i*step]),b=project([cx+extent,0,cz+i*step]);ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();a=project([cx+i*step,0,cz-extent]),b=project([cx+i*step,0,cz+extent]);ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke()}};const[x,,z]=renderedRoot(),rootDistance=Math.max(Math.abs(x),Math.abs(z)),outerAlpha=.72*Math.max(0,Math.min(1,(rootDistance-3.5)/2.5));if(outerAlpha)drawGrid(18,outerAlpha,'#173943',1);drawGrid(initialExtent,1,'#173943',2);ctx.globalAlpha=1;ctx.strokeStyle='#23606b';ctx.lineWidth=3;const xAxis=project([cx-initialExtent,0,cz]),zAxis=project([cx,0,cz-initialExtent]),xEnd=project([cx+initialExtent,0,cz]),zEnd=project([cx,0,cz+initialExtent]);ctx.beginPath();ctx.moveTo(xAxis[0],xAxis[1]);ctx.lineTo(xEnd[0],xEnd[1]);ctx.moveTo(zAxis[0],zAxis[1]);ctx.lineTo(zEnd[0],zEnd[1]);ctx.stroke()}function draw(){ctx.clearRect(0,0,canvas.width,canvas.height);const p=pose();ground();if(p.length){ctx.lineCap='round';for(let pass=0;pass<2;pass++){ctx.strokeStyle=pass?'#65eee1':'#071014';ctx.lineWidth=pass?7:13;for(let i=1;i<parents.length;i++){const a=project(p[i]),b=project(p[parents[i]]);ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke()}}for(const x of p){const a=project(x);ctx.fillStyle='#071014';ctx.beginPath();ctx.arc(a[0],a[1],7,0,Math.PI*2);ctx.fill();ctx.fillStyle='#ecfffd';ctx.beginPath();ctx.arc(a[0],a[1],4,0,Math.PI*2);ctx.fill()}}slider.value=frame;document.querySelector('#frameText').textContent=selected?`frame ${frame+1} / ${selected.frames}`:'No animation selected'}function tick(t){if(selected){const interval=1000/30;if(!last)last=t;if(playing){while(t-last>=interval){frame=(frame+1)%selected.frames;last+=interval}playbackBlend=Math.min(1,(t-last)/interval)}else playbackBlend=0;updateCamera(t);draw()}requestAnimationFrame(tick)}
-async function select(a){if(a.status!=='ready')return;selected=a;download.href=`/api/animations/${a.id}/animation.glb`;download.download=`kimodo-${a.id}.glb`;download.hidden=false;promptBox.value=a.prompt;window.dispatchEvent(new CustomEvent('kimodo:restore-sequence',{detail:{segments:a.segments,model:a.model,text_quantization:a.text_quantization}}));status.className='readout';status.textContent=`Selected ${a.id.slice(0,8)} · sequence restored`;[root,rotations]=await Promise.all([fetch(`/api/animations/${a.id}/root.f32`).then(r=>r.arrayBuffer()).then(b=>new Float32Array(b)),fetch(`/api/animations/${a.id}/rotations.f32`).then(r=>r.arrayBuffer()).then(b=>new Float32Array(b))]);frame=0;playbackBlend=0;last=performance.now();snapCamera();slider.max=a.frames-1;renderGallery();draw()}function renderGallery(){if(!animations.length){items.textContent='No animations yet.';return}items.replaceChildren(...animations.map(a=>{const b=document.createElement('button');b.className='item '+a.status+(selected?.id===a.id?' active':'');b.disabled=a.status!=='ready';b.innerHTML=`<p>${a.prompt}</p><span class="status">${a.status} · ${a.frames} frames · ${a.diffusion_steps} steps · ${a.text_quantization||'bf16'}</span>${a.error?`<div class="error">${a.error}</div>`:''}`;b.onclick=()=>select(a);return b}))}function showProgress(){const a=animations.find(a=>a.id===activeRequest);if(!a)return;if(a.status==='ready'){status.className='readout';status.textContent='Generation complete — select it from the gallery to play it.';activeRequest=undefined;generate.disabled=false;return}if(a.status==='failed'){status.className='error';status.textContent=`Generation failed: ${a.error}`;activeRequest=undefined;generate.disabled=false;return}const seconds=Math.max(0,Math.floor((Date.now()-activeStarted)/1000));status.className='readout progress';status.textContent=a.status==='running'?`Generating motion… ${seconds}s elapsed`:`Queued for generation… ${seconds}s elapsed`;generate.disabled=true}async function refresh(){animations=await fetch('/api/animations').then(r=>r.json());renderGallery();showProgress()}generate.onclick=async()=>{const prompt=promptBox.value.trim();if(!prompt)return;generate.disabled=true;status.className='readout progress';status.textContent='Submitting generation…';try{const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,frames:150,steps:100,seed:0})});if(!r.ok)throw new Error(await r.text());const a=await r.json();activeRequest=a.id;activeStarted=Date.now();await refresh()}catch(e){status.className='error';status.textContent=e.message;generate.disabled=false}};
-document.querySelector('#play').onclick=e=>{playing=!playing;last=performance.now();playbackBlend=0;e.target.textContent=playing?'Pause':'Play'};slider.oninput=()=>{frame=Number(slider.value);playbackBlend=0;last=performance.now();draw()};document.querySelector('#reset').onclick=reset;canvas.addEventListener('dblclick',reset);canvas.addEventListener('contextmenu',e=>e.preventDefault());let drag;canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,pan:e.button===2||e.shiftKey};canvas.classList.add('dragging')});canvas.addEventListener('pointermove',e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;e.clientY;drag.y=e.clientY;if(drag.pan){view.panX+=dx;view.panY+=dy}else{view.yaw+=dx*.008;view.pitch=Math.max(-1.25,Math.min(1.25,view.pitch+dy*.008))}draw()});function end(){drag=undefined;canvas.classList.remove('dragging')}canvas.addEventListener('pointerup',end);canvas.addEventListener('pointercancel',end);canvas.addEventListener('wheel',e=>{e.preventDefault();view.zoom=Math.max(350,Math.min(3600,view.zoom*Math.exp(-e.deltaY*.001)));draw()},{passive:false});refresh().then(()=>{const a=animations.find(a=>a.status==='ready');if(a)return select(a);draw()});setInterval(refresh,2500);requestAnimationFrame(tick);
-</script><script>document.querySelector('#download').textContent='Download animated GLB';document.querySelector('#download').title='Download the selected motion as an animated GLB';</script></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kimodo text to motion</title>
+<!-- three.js r170 is vendored; viewport.js / editing.js import "three" and "three/addons/...". -->
+<script type="importmap">
+{"imports": {"three": "/assets/three/three.module.min.js", "three/addons/": "/assets/three/"}}
+</script>
+<link rel="icon" href="/localai.png">
+<link rel="stylesheet" href="/editor/style.css">
+<script type="module" src="/editor/app.js"></script>
+</head>
+<body>
+<main class="app">
+  <aside class="sidebar">
+    <header class="brand">
+      <div class="eyebrow" id="eyebrow">Kimodo · Vulkan</div>
+      <div class="product-title"><span class="product-mark">K</span><h1>Text to motion</h1></div>
+    </header>
+    <nav class="tabs" role="tablist" aria-label="Sidebar">
+      <button type="button" role="tab" id="tab-generate" aria-controls="panel-generate" aria-selected="true">Generate</button>
+      <button type="button" role="tab" id="tab-visualize" aria-controls="panel-visualize" aria-selected="false">Visualize</button>
+      <button type="button" role="tab" id="tab-instructions" aria-controls="panel-instructions" aria-selected="false">Instructions</button>
+    </nav>
+    <div class="panels">
+      <!-- ============================================================ Generate -->
+      <section class="panel" id="panel-generate" role="tabpanel" aria-labelledby="tab-generate">
+        <details class="folder" open>
+          <summary>Model</summary>
+          <div class="folder-body">
+            <label>Motion model <select id="model"></select></label>
+            <div class="hint" id="modelHint"></div>
+            <label>Text encoder quantization <select id="quantization"></select></label>
+            <div class="hint" id="quantizationHint"></div>
+          </div>
+        </details>
+
+        <details class="folder" open>
+          <summary>Prompts <span class="summary-extra" id="segmentCount"></span></summary>
+          <div class="folder-body">
+            <div class="segments" id="segments"></div>
+            <div class="field-row">
+              <span class="total" id="totalDuration">Total duration: 6.0 s</span>
+              <button type="button" class="secondary" id="addSegment">+ Add segment</button>
+            </div>
+            <div class="hint">Each segment is 60–300 frames (2–10 s at 30 fps). Segments run in sequence; the transition eats into the next segment. Prompts can also be edited in the timeline (double-click a block, drag its edges).</div>
+          </div>
+        </details>
+
+        <details class="folder">
+          <summary>Model parameters <span class="summary-extra" id="paramsSummary"></span></summary>
+          <div class="folder-body">
+            <label>Seed
+              <span class="field-row">
+                <input type="number" id="seed" min="0" step="1" value="42">
+                <button type="button" class="secondary icon" id="randomSeed" title="Random seed" aria-label="Random seed">&#x2684;</button>
+              </span>
+            </label>
+            <div class="subhead">Diffusion</div>
+            <div class="slider-row"><span>Denoising steps</span><input type="range" id="stepsRange" min="2" max="1000" step="1" value="100" aria-label="Denoising steps"><input type="number" id="steps" min="2" max="1000" step="1" value="100" aria-label="Denoising steps value"></div>
+            <div class="subhead">Classifier-free guidance</div>
+            <div class="slider-row"><span>Text weight</span><input type="range" id="textCfgRange" min="0" max="5" step="0.1" value="2" aria-label="Text weight"><input type="number" id="textCfg" min="0" max="5" step="0.1" value="2" aria-label="Text weight value"></div>
+            <div class="slider-row"><span>Constraint weight</span><input type="range" id="constraintCfgRange" min="0" max="5" step="0.1" value="2" aria-label="Constraint weight"><input type="number" id="constraintCfg" min="0" max="5" step="0.1" value="2" aria-label="Constraint weight value"></div>
+            <div class="subhead">Transitions</div>
+            <div class="slider-row"><span>Transition frames</span><input type="range" id="transitionRange" min="1" max="10" step="1" value="5" aria-label="Transition frames"><input type="number" id="transition" min="1" max="10" step="1" value="5" aria-label="Transition frames value"></div>
+          </div>
+        </details>
+
+        <details class="folder" id="postFolder">
+          <summary>Post processing <span class="summary-extra" id="postSummary">on</span></summary>
+          <div class="folder-body">
+            <label class="check"><input type="checkbox" id="postProcessing" checked> Enable</label>
+            <label id="rootMarginRow">Root margin (m) <input type="number" id="rootMargin" min="0" max="1" step="0.01" value="0.04"></label>
+            <div class="hint">Foot-skate cleanup and constraint correction: if the root drifts more than the margin from a constraint, post-processing fixes it.</div>
+          </div>
+        </details>
+
+        <button type="button" class="generate-button" id="generate">Generate</button>
+        <div class="status-line" id="status" role="status">Ready</div>
+
+        <details class="folder" open>
+          <summary>Constraints <span class="summary-extra" id="constraintSummary"></span></summary>
+          <div class="folder-body">
+            <label id="gizmoSpaceRow">Gizmo space
+              <select id="gizmoSpace"><option value="local">Local</option><option value="world">World</option></select>
+            </label>
+            <div class="button-grid">
+              <button type="button" class="wide" id="editMode">Enter Editing Mode</button>
+              <button type="button" class="secondary" id="snap" disabled>Snap to Constraint</button>
+              <button type="button" class="secondary" id="resetPose" disabled>Reset Constraint</button>
+              <button type="button" class="secondary wide" id="undoMove" disabled>Undo Move</button>
+            </div>
+            <div class="subhead">Root 2D options</div>
+            <label class="check"><input type="checkbox" id="smoothPath"> Make Smooth Path</label>
+            <label class="check"><input type="checkbox" id="onlyCurrentC"> Show only Current</label>
+            <div class="heading-row">
+              <span class="readout" id="headingReadout">No 2D Root at this frame</span>
+              <button type="button" class="secondary small" id="editHeading" disabled title="Rotate the heading ring of the 2D Root waypoint at the current frame (editing mode)">Edit heading</button>
+              <button type="button" class="secondary small" id="clearHeading" disabled title="Remove the optional heading of the 2D Root waypoint at the current frame">Clear</button>
+            </div>
+            <div class="subhead">Constrained frames</div>
+            <div class="counts" id="counts"></div>
+            <div class="warning-note" id="countWarning" hidden>Fewer than 20 constrained frames per type usually gives the best results (dense 2D root paths are fine).</div>
+            <button type="button" class="danger" id="clearConstraints">Clear All Constraints</button>
+            <div class="button-grid">
+              <button type="button" class="secondary" id="saveConstraints">Save Constraints</button>
+              <button type="button" class="secondary" id="loadConstraints">Load Constraints</button>
+            </div>
+            <input type="file" id="constraintsFile" accept=".json,application/json" hidden>
+            <div class="hint">Click a timeline track to add a constraint at that frame; it snapshots the pose shown in the viewport. Use Editing Mode to pose the character first.</div>
+          </div>
+        </details>
+
+        <details class="folder" open>
+          <summary>Past animations <span class="summary-extra" id="galleryCount"></span></summary>
+          <div class="folder-body">
+            <div class="gallery-tools">
+              <input type="search" id="gallerySearch" placeholder="Filter by prompt…" aria-label="Filter animations by prompt">
+              <label class="check" title="Only animations generated with constraints"><input type="checkbox" id="galleryConstrained"> ◆</label>
+            </div>
+            <div class="gallery" id="gallery"><span class="readout">Loading…</span></div>
+          </div>
+        </details>
+      </section>
+
+      <!-- =========================================================== Visualize -->
+      <section class="panel" id="panel-visualize" role="tabpanel" aria-labelledby="tab-visualize" hidden>
+        <details class="folder" open>
+          <summary>Body</summary>
+          <div class="folder-body">
+            <label class="check"><input type="checkbox" id="showMesh" checked> Show mesh</label>
+            <div class="slider-row"><span>Mesh opacity</span><input type="range" id="meshOpacity" min="0" max="1" step="0.01" value="1" aria-label="Mesh opacity"><output id="meshOpacityOut">1.00</output></div>
+            <label class="check"><input type="checkbox" id="showSkeleton"> Show skeleton</label>
+            <label class="check" id="showContactsRow"><input type="checkbox" id="showContacts"> Show foot contacts</label>
+          </div>
+        </details>
+        <details class="folder" open>
+          <summary>Interface</summary>
+          <div class="folder-body">
+            <label class="check"><input type="checkbox" id="showLabels" checked> Show constraint labels</label>
+            <label class="check"><input type="checkbox" id="showStartDirection" checked> Show starting direction</label>
+            <label class="check"><input type="checkbox" id="onlyCurrentV"> Show only current constraint</label>
+          </div>
+        </details>
+        <details class="folder" open>
+          <summary>Camera &amp; playback</summary>
+          <div class="folder-body">
+            <label class="check"><input type="checkbox" id="follow" checked> Camera follows the character</label>
+            <div class="slider-row"><span>Camera FOV (deg)</span><input type="range" id="fov" min="30" max="90" step="1" value="45" aria-label="Camera field of view"><output id="fovOut">45</output></div>
+            <button type="button" class="secondary" id="resetCamera">Reset camera</button>
+            <div class="field-row"><span class="readout">Playback speed</span>
+              <div class="speed" role="group" aria-label="Playback speed (sidebar)" data-speed-group>
+                <button type="button" data-speed="0.5">0.5x</button><button type="button" data-speed="1" aria-pressed="true">1x</button><button type="button" data-speed="2">2x</button>
+              </div>
+            </div>
+            <div class="hint">Model FPS: 30</div>
+          </div>
+        </details>
+      </section>
+
+      <!-- ======================================================== Instructions -->
+      <section class="panel instructions" id="panel-instructions" role="tabpanel" aria-labelledby="tab-instructions" hidden>
+        <h2>How to use this demo</h2>
+        <h3>Camera</h3>
+        <ul>
+          <li><b>Left-drag</b>: rotate · <b>Right-drag</b>: pan · <b>Scroll</b>: zoom</li>
+          <li><b>Reset camera</b> and <b>Camera follow</b> are in the Visualize tab.</li>
+        </ul>
+        <h3>Playback</h3>
+        <ul>
+          <li><kbd>Space</kbd> to play/pause, <kbd>←</kbd>/<kbd>→</kbd> to step frames.</li>
+          <li>Click or drag the frame numbers at the top of the timeline to scrub.</li>
+          <li><b>Scroll</b> in the timeline: move left/right · <b>Shift + scroll</b>: zoom in/out · double-click the frame numbers to fit the clip.</li>
+        </ul>
+        <h3>Prompts</h3>
+        <ul>
+          <li><b>Double-click</b> a prompt block to edit its text (<kbd>Enter</kbd> commits, <kbd>Esc</kbd> cancels).</li>
+          <li><b>Drag</b> the boundary between two prompts, or the right edge of the last one, to change durations (2–10 s each).</li>
+          <li><b>Click</b> the empty space after the last prompt to add one; <b>Shift+click</b> splits a prompt; <b>right-click</b> deletes it (right-click a boundary merges two).</li>
+          <li>The same segments are listed in the Generate tab.</li>
+        </ul>
+        <h3>Generate</h3>
+        <ul>
+          <li>Pick the motion model and options in the <b>Generate</b> tab and click <b>Generate</b>.</li>
+          <li>Past animations restore their prompts, settings and constraints when selected (not while a generation runs). Settings an older animation did not record keep their current values.</li>
+        </ul>
+        <h3>Constraints</h3>
+        <ul>
+          <li>Optional; usually added after a first generation.</li>
+          <li><b>Click</b> a timeline track (Full-Body, 2D Root, hands, feet) to add a keyframe at that frame. The constraint is a snapshot of the character shown in the viewport at that frame.</li>
+          <li><b>Right-click</b> a constraint to delete it.</li>
+          <li>To <b>edit</b> a constraint: move the playhead to its frame and click <b>Enter Editing Mode</b>.</li>
+        </ul>
+        <hr>
+        <h3>Generating motion step by step</h3>
+        <ol>
+          <li><b>Edit the text prompts</b> (e.g. “A person walks forward.”).</li>
+          <li><b>Set the durations</b> by dragging the prompt edges (2–10 s each).</li>
+          <li><b>Add constraints</b> (optional): pose the character in Editing Mode, then click the tracks to place keyframes or intervals.</li>
+          <li><b>Click Generate.</b> The new animation is selected when it is ready; its constraints stay on the timeline.</li>
+        </ol>
+        <h3>Timeline editing</h3>
+        <ul>
+          <li><b>Click</b> an empty spot to add a keyframe; keep the button held to drag it.</li>
+          <li><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + drag on empty space adds an interval; <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + drag the edge of a keyframe or interval to stretch it.</li>
+          <li><b>Drag</b> keyframes or intervals to move them. A moved constraint takes the pose of the motion at its new frame.</li>
+          <li><b>Clear All Constraints</b> removes everything. A track shows <b>!</b> once it has 20 or more constrained frames: fewer usually works better.</li>
+          <li>Shortening the clip keeps constraints past the new end: they are drawn faded after the end line and are not sent until the clip is long enough again (or you drag them back in).</li>
+        </ul>
+        <h3>Constraint types</h3>
+        <ul>
+          <li><b>Full-Body</b>: the position of every joint.</li>
+          <li><b>2D Root</b>: the path on the ground. <b>Make Smooth Path</b> turns the waypoints into a continuous path (anchored at the first and last frame).</li>
+          <li><b>Hands / Feet</b>: the position of the wrist/ankle chain and the rotation of the wrist/ankle, one track per limb. Like Full-Body, a hand/foot keyframe also fixes the pelvis position on the ground, the hip height and the facing direction of the stored pose (the red root joint of its ghost); only the rest of the body is free.</li>
+        </ul>
+        <h3>Editing mode</h3>
+        <ul>
+          <li>The skeleton is shown. <b>Click a joint</b> to get its rotation gizmo; <b>drag the ground arrows</b> under the character to move the whole pose.</li>
+          <li>With the hips selected, <kbd>W</kbd> switches to moving them (hip height) and <kbd>E</kbd> back to rotating. <kbd>Esc</kbd> deselects.</li>
+          <li>At a frame with a <b>2D Root</b> waypoint, <b>Edit heading</b> (Root 2D options) shows a ring that sets the optional facing direction of that waypoint; <b>Clear</b> removes it. Clicking the waypoint ring in the view does the same.</li>
+          <li>Pick <b>Gizmo space</b> (Local/World) before entering Editing Mode.</li>
+          <li>Edits change the displayed motion and any constraint already at that frame. <b>Reset Constraint</b> restores the frame, <b>Undo Move</b> reverts the last drag, <b>Snap to Constraint</b> copies the constraint’s pose into the motion.</li>
+          <li>Generating is disabled until you exit Editing Mode.</li>
+        </ul>
+        <h3>Saving &amp; loading</h3>
+        <ul>
+          <li><b>Save Constraints</b> downloads <code>constraints.json</code> (the NVIDIA Kimodo format); <b>Load Constraints</b> reads one back, including files saved by the official demo.</li>
+          <li><b>Download GLB</b> (below the viewport) exports the selected animation.</li>
+        </ul>
+        <h3>Visualization</h3>
+        <ul>
+          <li>The Visualize tab toggles the mesh, skeleton, foot contacts, labels and the starting-direction arrow.</li>
+          <li>Constraint ghosts: Full-Body poses are drawn with yellow joints and red bones; for hands and feet the constrained joints and bones (and the root) are red and the rest of the pose is grey, for reference only.</li>
+        </ul>
+      </section>
+    </div>
+  </aside>
+
+  <section class="stage">
+    <div class="viewport" id="viewport" aria-label="3D view">
+      <div class="mode-banner" id="modeBanner" hidden>Editing mode · click a joint to pose it · drag the ground arrows to move the body</div>
+    </div>
+    <div class="playbar">
+      <button type="button" class="play" id="play" title="Play / pause (Space)" aria-label="Play"></button>
+      <span class="frame-readout" id="frameReadout">frame 0 / 0</span>
+      <div class="speed" role="group" aria-label="Playback speed" data-speed-group>
+        <button type="button" data-speed="0.5">0.5x</button><button type="button" data-speed="1" aria-pressed="true">1x</button><button type="button" data-speed="2">2x</button>
+      </div>
+      <span class="spacer"></span>
+      <span class="selected-label" id="selectedLabel"></span>
+      <a class="button download" id="download" hidden download>Download GLB</a>
+    </div>
+    <div class="timeline" id="timeline"></div>
+  </section>
+</main>
+<img class="localai-logo" src="/localai.png" alt="LocalAI">
+<div class="toasts" id="toasts" aria-live="polite"></div>
+</body>
+</html>
