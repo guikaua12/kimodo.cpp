@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"embed"
 	"encoding/binary"
@@ -341,6 +342,11 @@ func writeSkeletonGLB(path string, roots, rotations []float32, skeleton skeleton
 	putU32(uint32(len(bin)))
 	putU32(0x004e4942)
 	out = append(out, bin...)
+	// Startup re-exports every ready animation; leave an identical file alone so
+	// the gallery directory (and its modification times) is not rewritten.
+	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, out) {
+		return nil
+	}
 	return os.WriteFile(path, out, 0600)
 }
 

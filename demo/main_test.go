@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestWriteSkeletonGLB(t *testing.T) {
@@ -24,6 +25,26 @@ func TestWriteSkeletonGLB(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertSkeletonGLB(t, path, len(skeleton.parents))
+
+			// A second export of the same motion must not rewrite the file.
+			old := time.Now().Add(-time.Hour).Truncate(time.Second)
+			if err := os.Chtimes(path, old, old); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeSkeletonGLB(path, roots, rotations, skeleton); err != nil {
+				t.Fatal(err)
+			}
+			if info, err := os.Stat(path); err != nil || !info.ModTime().Equal(old) {
+				t.Fatalf("identical GLB was rewritten: %v %v", info.ModTime(), err)
+			}
+			// A changed motion is written.
+			roots[3] = 2
+			if err := writeSkeletonGLB(path, roots, rotations, skeleton); err != nil {
+				t.Fatal(err)
+			}
+			if info, err := os.Stat(path); err != nil || info.ModTime().Equal(old) {
+				t.Fatalf("changed GLB was not rewritten: %v", err)
+			}
 		})
 	}
 }
