@@ -191,6 +191,39 @@ The page follows NVIDIA's Kimodo demo:
   Run in a circle passed every GPU check wherever its dialog shows no
   warning. It warns above 4 m/s (the feet slide), above 90°/s of turn (the
   body lags the path) and on running circles wider than 5 m (they float).
+- **Poses** (*Browse poses…*) picks a body pose that a generation keeps from
+  start to end: *Rifle: low ready*, *Rifle: collapsed low ready* and *Crouch*
+  (experimental). Words alone do not hold a pose: Kimodo reads "low ready"
+  differently from seed to seed, and crouch wordings make it hunch 60-80°.
+  So a pose is mostly constraints:
+  - **Rifle poses.** *Low ready* has the rifle pointing forward with the muzzle
+    angled down: stock at the shoulder, support hand forward on the handguard.
+    *Collapsed low ready* has it pulled in across the body, muzzle down-left.
+    Both generate the same way, with a prompt phrase and Kimodo's own rifle
+    carry, which is the cross-body one. With a path preset, both hands are
+    pinned to that carry every ~8 frames along the path. The preset's idle
+    pins hold it too, and its frame-0 Hips pin holds its walk pose. That keeps
+    the body upright: pinning hands where Kimodo would not put them makes it
+    lean and bow the head. After generation, the server applies a **pose
+    layer**: it holds the arms under the chest on the pose's carry on every
+    frame, and keeps the model's own arm sway on top. Kimodo never generates
+    the muzzle-forward low ready, so that carry is authored and is reached
+    only through the layer. The raw engine rotations are kept beside the posed
+    ones (`model_rotations.f32`). Playback and the GLB download include the
+    layer. Without a preset, a rifle pose adds its phrase, gives Full-Body
+    keyframes the rifle arms, and adds hand pins where a 2D root with headings
+    covers the clip.
+  - **Crouch** comes with the path presets and adds no words. The idle pins
+    hold a crouch idle pose, and moving starts (and ends) pin a crouch walk
+    pose. Dense Hips pins hold the pelvis at 0.66-0.70 m with a 15° forward
+    tilt. It was checked on the GPU on Constant Speed, Strafe, Forward turn,
+    Start, Stop and Turn in place at 1.0 m/s (3 seeds each with the start walk
+    pair; the end pair, on by default, on 2 seeds). Idle and turn clips lean
+    about 39°. Moving clips lean 40-49° and read as a creeping crouch. Crouch
+    starts sometimes sink a few centimetres into the floor.
+
+  Choosing a pose while an unedited path preset is applied rebuilds the preset
+  with it. One pose at a time: rifle and crouch do not combine yet.
 - **Save / Load Constraints** read and write the official Kimodo
   `constraints.json`. SOMA files are written with the 30 control joints, like
   the shipped SOMA examples; 77-joint files saved by the official demo are
@@ -211,8 +244,11 @@ Deviations from the upstream demo:
   30-joint control skeleton's FK, like upstream's CLI. The Hugging Face demo
   uses 77-joint FK, so `*HandMiddleEnd` differs there by a few centimetres.
 - G1 motions are never post-processed, like upstream.
-- The Hips track and the path presets are additions; upstream's demo has
-  neither (its `constraints.json` format already allows a Hips end-effector).
+- The Hips track, the path presets and the poses are additions; upstream's
+  demo has none of them (its `constraints.json` format already allows a Hips
+  end-effector). `/api/generate` takes an optional `pose` object
+  (`{id, label, params, layer}`, see `demo/pose_layer.go`); the server keeps it
+  as `pose.json` beside `constraints.json`.
 
 Editor development notes (serving it from the checkout with `-web-dir demo`,
 the viewport harness, module overview) are in

@@ -70,6 +70,9 @@
 //                                    settings: {post_processing, root_margin},
 //                                    summary: {duration_s, distance_m, end: [x, z], net_turn_deg, max_speed},
 //                                    warnings: string[]}
+//   place(pose, [x, z], yaw)         a {rot, pelvis} pose placed on a path point (clips.py place)
+//   poseObject(type, frames, placed, extra)
+//                                    constraints.json object of placed poses
 //   presetSVG(sim, opts)             top-down SVG markup string (no DOM)
 //   gaitVerb(speed)                  'walks' (< 2 m/s) | 'jogs' (< 4) | 'runs'
 //   previewBuffers(built, skeleton, {poses})
@@ -721,7 +724,7 @@ const r6 = (v) => {
  * [x, z], turned by yaw about +Y (Hips rotation left-multiplied by q_yaw, the
  * pelvis offset rotated). Returns {rot: [J][3] axis-angle, root: [x, y, z], smooth: [x, z]}.
  */
-function place(pose, target, yaw = 0) {
+export function place(pose, target, yaw = 0) {
   const rot = pose.rot.map((r) => [r[0], r[1], r[2]]);
   let ox = pose.pelvis[0], oz = pose.pelvis[2];
   if (yaw) {
@@ -733,7 +736,8 @@ function place(pose, target, yaw = 0) {
   return { rot, root: [target[0] + ox, pose.pelvis[1], target[1] + oz], smooth: [target[0], target[1]] };
 }
 
-function poseObject(type, frames, placed, extra = {}) {
+/** A constraints.json pose object (fullbody, sided limb or end-effector) of placed() poses, rounded to 6 decimals. */
+export function poseObject(type, frames, placed, extra = {}) {
   return {
     type,
     ...extra,

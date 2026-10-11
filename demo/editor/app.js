@@ -52,6 +52,21 @@
 //   forgets it (the animation our own Generate selects keeps it: the store
 //   still holds the preset's constraints). Applying cancels a gallery
 //   selection that is still loading.
+// - Poses (poses.js + the poses_ui.js dialog): state.pose = {id, params} is a
+//   generation option, kept until changed (not stored across reloads).
+//   Choosing one while a path preset is applied, and not edited since (its
+//   prompts and constraints still match what it built), rebuilds the preset
+//   with it (buildPosedPreset: pose bodies in the idle / Hips pins, hand guide
+//   pins, the pose phrase). Otherwise the preset is forgotten and the pose
+//   phrase is spliced into the prompts at once (and into new segments).
+//   At Generate, composeRequest adds what the request lacks: the natural
+//   carry's arms on Full-Body keyframes, and hand guide pins along a 2D root
+//   that covers every frame, on frames with a known facing and away from the
+//   existing pins, so a posed preset gets nothing twice. The request carries
+//   `pose` (id, label, params, layer); the server applies the layer after
+//   generation. Whenever an animation's constraints are restored (a gallery
+//   click, or the newest one on page load) its pose comes back with them
+//   (none if it had none).
 //
 // Debug handle for automated tests: window.__kimodo.
 
@@ -61,8 +76,13 @@ import { ConstraintStore, TRACKS, TRACK_LABELS, TRACK_COLORS, WARN_FRAMES, valid
 import { Timeline, PROMPT_COLORS } from './timeline.js';
 import { Viewport } from './viewport.js';
 import { Editor } from './editing.js';
-import { buildPreset, previewBuffers } from './presets.js';
+import { previewBuffers } from './presets.js';
 import { PresetsDialog, presetReadout } from './presets_ui.js';
+import {
+  POSES, applyPoseLayer, buildPosedPreset, composeRequest, normalizePoseParams, poseAvailable, poseById, posePrompt, presetPosesFor,
+  stripPosePhrases,
+} from './poses.js';
+import { PosesDialog, poseReadout } from './poses_ui.js';
 
 const FPS = 30;
 const MIN_FRAMES = 60;
@@ -114,7 +134,8 @@ const state = {
   gallerySig: '',
   galleryLimit: GALLERY_PAGE,
   active: null,         // generation in flight {id, started}
-  preset: null,         // applied path preset {id, params, prompt, label} (null: none)
+  preset: null,         // applied path preset {id, params, prompt, label, poseId} (null: none)
+  pose: null,           // pose preset {id, params} sent with every generation (null: none)
   editing: false,
   undoAvailable: false,
   visBeforeEdit: null,
@@ -127,6 +148,8 @@ let viewport = null;
 let editor = null;
 let timeline = null;
 let presetsDialog = null;
+let posesDialog = null;
+let somaSkeleton = null; // SOMA-30 Skeleton for the pose drawings (any skeleton is current)
 let selectToken = 0;
 // What the RAF loop last pushed to the viewport / timeline.
 const seen = { motion: null, motionVersion: -1, frame: -1, store: null, storeVersion: -1, numFrames: -1, readoutFrames: -1 };
@@ -429,9 +452,10 @@ function restoreParams(a, { all = true } = {}) {
   params.summary();
 }
 
+/** The /api/generate body, and the pose notes (things the pose could not add). */
 function requestBody() {
   const n = numFrames();
-  return {
+  const body = {
     segments: state.segments.map((s) => ({ prompt: s.prompt.trim(), frames: s.frames })),
     model: state.model.id,
     text_quantization: $('quantization').value,
@@ -444,6 +468,17 @@ function requestBody() {
     root_margin: Number($('rootMargin').value),
     constraints: state.store.toModelJSON(n),
   };
+  let notes = [];
+  if (state.pose) {
+    // Adds only what the store lacks (a posed path preset already holds its pins).
+    const r = composeRequest({ segments: body.segments, constraints: body.constraints, frames: n }, state.pose.id, state.pose.params, { skeletonKey: state.skeleton.key });
+    body.constraints = r.constraints;
+    const pose = r.pose;
+    body.pose = { id: pose.id, label: pose.label, params: pose.params, ...(pose.layer ? { layer: pose.layer } : {}) };
+    // A posed preset that is still as built holds everything its notes describe.
+    notes = state.preset?.poseId === pose.id && presetIntact() ? [] : r.notes;
+  }
+  return { body, notes };
 }
 
 // ---------------------------------------------------------------------------
@@ -461,9 +496,9 @@ async function generate() {
     toast('Model not available', { body: state.model?.reason || 'The selected motion model is not installed.', kind: 'error' });
     return;
   }
-  let body;
+  let body, notes;
   try {
-    body = requestBody();
+    ({ body, notes } = requestBody());
   } catch (err) {
     toast('Could not build the constraints', { body: errorText(err), kind: 'error' });
     return;
@@ -476,7 +511,9 @@ async function generate() {
     const a = await r.json();
     state.active = { id: a.id, started: Date.now(), constraints: body.constraints.length };
     setGenerating(true);
-    toast('Waiting for the GPU…', { body: body.constraints.length ? `${a.constraint_count ?? ''} constrained frames sent with the request.`.trim() : '' });
+    const sent = body.constraints.length ? `${a.constraint_count ?? ''} constrained frames sent with the request.`.trim() : '';
+    const pose = body.pose ? ` Pose: ${body.pose.label}${body.pose.layer ? ' (with its pose layer)' : ''}.` : '';
+    toast('Waiting for the GPU…', { body: `${sent}${pose}${notes.length ? ` ${notes.join(' ')}` : ''}`.trim(), timeout: notes.length ? 7000 : undefined });
     await refreshGallery();
   } catch (err) {
     setStatus(`Generation failed: ${errorText(err)}`, 'error');
@@ -636,6 +673,8 @@ async function selectAnimation(a, { loadConstraints = true, quiet = false, resto
     state.preset = null;
     updatePresetReadout();
   }
+  // A past request's pose comes back with its constraints and prompts (none if it had none).
+  if (loadConstraints) setPose(a.pose && POSES.some((d) => d.id === a.pose.id) ? { id: a.pose.id, params: a.pose.params } : null);
 
   setModel(entry);
   restoreParams(a, { all: restoreSettings });
@@ -719,7 +758,8 @@ function updateDownload() {
   link.hidden = !a;
   // No selected animation + an applied preset: the motion is the preset preview.
   const preset = !a && state.preset;
-  $('selectedLabel').textContent = a ? animationText(a) : preset ? `Preset preview · ${preset.label} (not generated yet)` : 'Rest pose · no animation selected';
+  const posed = preset && preset.poseId ? ` + ${poseById(preset.poseId).label}` : '';
+  $('selectedLabel').textContent = a ? animationText(a) : preset ? `Preset preview · ${preset.label}${posed} (not generated yet)` : 'Rest pose · no animation selected';
   $('selectedLabel').title = a ? `${a.id} · ${animationText(a)}` : preset ? `${presetReadout(preset)} · ${preset.prompt}` : '';
   if (a) {
     link.href = `/api/animations/${encodeURIComponent(a.id)}/animation.glb`;
@@ -841,6 +881,21 @@ function presetSkeletonKey() {
   return state.skeleton?.key === 'soma30' || presetModel() ? 'soma30' : (state.skeleton?.key || 'soma30');
 }
 
+/** What an applied preset built: its prompts and constraints (compared to tell an edited preset). */
+function presetSignature() {
+  return JSON.stringify([state.segments, state.store.toModelJSON(numFrames())]);
+}
+
+/** True while the applied path preset's prompts and constraints are unedited. */
+function presetIntact() {
+  if (!state.preset) return false;
+  try {
+    return state.preset.signature === presetSignature();
+  } catch {
+    return false;
+  }
+}
+
 function updatePresetReadout() {
   const p = state.preset;
   $('presetApplied').hidden = !p;
@@ -855,7 +910,7 @@ function updatePresetReadout() {
  * the preset's constraints and generation settings; then generates when asked.
  * Returns false when refused (a generation is running) or on failure.
  */
-function applyPreset(built, { generate: andGenerate = false } = {}) {
+function applyPreset(built, { generate: andGenerate = false, keepSettings = false } = {}) {
   if (state.active) {
     toast('Generation running', { body: 'Wait for the current generation to finish before applying a preset.', kind: 'warn' });
     return false;
@@ -871,7 +926,7 @@ function applyPreset(built, { generate: andGenerate = false } = {}) {
       setModel(entry);
       toast('Model switched', { body: `Path presets pin poses of the SOMA skeleton; now using ${entry.label}.` });
     } else if (state.skeleton?.key !== 'soma30') {
-      built = { ...buildPreset(built.id, built.params, { skeletonKey: state.skeleton.key }), prompt: built.prompt };
+      built = { ...buildPosedPreset(built.id, built.params, built.pose?.id ?? null, built.pose?.params, { skeletonKey: state.skeleton.key }), prompt: built.prompt };
       toast('No SOMA model installed', { body: 'Pose pins need the SOMA skeleton; this preset is sent as a path only.', kind: 'warn' });
     }
   }
@@ -880,7 +935,11 @@ function applyPreset(built, { generate: andGenerate = false } = {}) {
   const T = built.frames;
   let motion;
   try {
-    const { local, root } = previewBuffers(built, state.skeleton);
+    const soma = state.skeleton.key === 'soma30';
+    const poseId = soma && built.pose && poseAvailable(built.pose.id) ? built.pose.id : null;
+    let { local, root } = previewBuffers(built, state.skeleton, poseId ? { poses: presetPosesFor(poseId) } : {});
+    // The preview shows the pose as the layer will leave it (e.g. the low ready's forward carry).
+    if (poseId && built.pose.layer) local = applyPoseLayer(local, T, state.skeleton.names, built.pose.layer);
     motion = new Motion(state.skeleton, T, local, root);
     validateModelJSON(built.constraints, state.skeleton);
   } catch (err) {
@@ -903,15 +962,19 @@ function applyPreset(built, { generate: andGenerate = false } = {}) {
     return false;
   }
 
-  // The settings the presets were measured with (G1: Post Processing stays off).
+  // The settings the presets were measured with (G1: Post Processing stays off);
+  // a pose change on an applied preset keeps the user's current ones.
   const settings = built.settings ?? { post_processing: true, root_margin: 0.06 };
-  if (!isG1()) {
+  if (!isG1() && !keepSettings) {
     $('postProcessing').checked = settings.post_processing;
     $('rootMargin').value = settings.root_margin;
   }
   params.summary();
 
-  state.preset = { id: built.id, params: { ...built.params }, prompt: built.prompt, label: built.label };
+  // basePrompt: the preset's prompt without pose words, so a pose change can re-splice it.
+  const basePrompt = built.basePrompt ?? stripPosePhrases(built.prompt).trim();
+  state.preset = { id: built.id, params: { ...built.params }, prompt: built.prompt, basePrompt, label: built.label, poseId: built.pose?.id ?? null };
+  state.preset.signature = presetSignature();
   updatePresetReadout();
   updateDownload();
   renderGallery(true);
@@ -919,13 +982,161 @@ function applyPreset(built, { generate: andGenerate = false } = {}) {
   setPlaying(true);
 
   const hips = built.pins.filter((p) => p.kind === 'hips').length;
-  const idle = built.pins.filter((p) => p.kind === 'fullbody').length;
-  const pins = [hips ? `${hips} Hips pin${hips === 1 ? '' : 's'}` : '', idle ? `${idle} idle pose pin${idle === 1 ? '' : 's'}` : ''].filter(Boolean).join(' + ') || 'no pose pins';
-  const post = isG1() ? 'Post Processing off (G1)' : `Post Processing ${settings.post_processing ? 'on' : 'off'}, root margin ${settings.root_margin} m`;
+  const idle = built.pins.filter((p) => p.kind === 'fullbody' && !/\.walk/.test(p.pose)).length;
+  const walkPins = built.pins.filter((p) => p.kind === 'fullbody' && /\.walk/.test(p.pose)).length;
+  const hands = built.pins.filter((p) => p.kind === 'hands').length;
+  const pins = [hips ? `${hips} Hips pin${hips === 1 ? '' : 's'}` : '', idle ? `${idle} idle pose pin${idle === 1 ? '' : 's'}` : '',
+    walkPins ? `${walkPins} walk pose pin${walkPins === 1 ? '' : 's'}` : '',
+    hands ? `hand guide pins on ${hands} frames` : ''].filter(Boolean).join(' + ') || 'no pose pins';
+  const poseText = built.pose ? ` Pose: ${built.pose.label}.` : '';
+  const post = isG1() ? 'Post Processing off (G1)' : `Post Processing ${$('postProcessing').checked ? 'on' : 'off'}, root margin ${$('rootMargin').value} m`;
   toast(`${built.label} applied`, {
-    body: `${T} frames, constrained 2D root path with headings, ${pins}; ${post}. ${andGenerate ? 'Generating…' : 'The viewport shows a preview until you Generate.'}`,
+    body: `${T} frames, constrained 2D root path with headings, ${pins}; ${post}.${poseText} ${andGenerate ? 'Generating…' : 'The viewport shows a preview until you Generate.'}`,
     kind: 'success',
     timeout: 5000,
+  });
+  if (andGenerate) generate();
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// poses
+// ---------------------------------------------------------------------------
+
+/** A SOMA-30 Skeleton for the pose drawings (from any served SOMA model entry), or null. */
+function poseSkeleton() {
+  if (state.skeleton?.key === 'soma30') return state.skeleton;
+  if (!somaSkeleton) {
+    const entry = state.models.find((m) => SOMA_KEYS.has(m.skeleton_key));
+    if (entry) somaSkeleton = new Skeleton(entry);
+  }
+  return somaSkeleton;
+}
+
+/** Sets state.pose and its sidebar readout (no prompt or constraint changes). */
+function setPose(choice) {
+  state.pose = choice ? { id: choice.id, params: normalizePoseParams(choice.id, choice.params) } : null;
+  // New prompt segments (sidebar button or timeline) start with the pose phrase.
+  if (timeline) timeline.opts.defaultPrompt = newSegmentPrompt();
+  updatePoseReadout();
+}
+
+function newSegmentPrompt() {
+  return state.pose ? posePrompt(state.pose.id, DEFAULT_PROMPT) : DEFAULT_PROMPT;
+}
+
+function updatePoseReadout() {
+  const p = state.pose;
+  $('poseApplied').hidden = !p;
+  $('poseReadout').textContent = p ? poseReadout(p) : '';
+  $('poseReadout').title = p ? poseById(p.id).description : '';
+  $('poseSummary').textContent = p ? poseById(p.id).label : 'none';
+}
+
+/** What the poses dialog's notes describe: the applied preset, the skeleton, a dense 2D root. */
+function poseContext() {
+  const n = numFrames();
+  const frames = new Set(), headed = new Set();
+  try {
+    for (const c of state.store.toModelJSON(n)) {
+      if (c.type !== 'root2d') continue;
+      c.frame_indices.forEach((f, k) => {
+        frames.add(f);
+        if (c.global_root_heading?.[k] && f > 0) headed.add(f);
+      });
+    }
+  } catch { /* an invalid store reports no path */ }
+  const soma = presetModel();
+  return {
+    preset: presetIntact() ? state.preset.label : null,
+    editedPreset: state.preset && !presetIntact() ? state.preset.label : null,
+    skeletonKey: state.skeleton?.key,
+    // Apply switches to a SOMA model only when that loses nothing (applyPose).
+    somaSwitch: state.skeleton?.key !== 'soma30' && soma && !state.store.items().length ? soma.label : null,
+    somaModel: soma?.label ?? null,
+    // composeRequest places hand pins only on frames with a known facing.
+    densePath: frames.size >= n && headed.size > 0,
+    denseNoHeadings: frames.size >= n && headed.size === 0,
+  };
+}
+
+/**
+ * Uses a pose (choice = {id, params}, or null for none) for the next
+ * generations. An applied path preset is rebuilt with it (its preview replaces
+ * the viewport); otherwise the pose phrase replaces any other pose phrase in
+ * every prompt segment. Returns false when refused.
+ */
+function applyPose(choice, { generate: andGenerate = false } = {}) {
+  if (!state.store) return false; // models not loaded yet
+  if (state.active) {
+    toast('Generation running', { body: 'Wait for the current generation to finish before changing the pose.', kind: 'warn' });
+    return false;
+  }
+  if (choice) {
+    const def = poseById(choice.id);
+    if (!poseAvailable(def.id)) {
+      toast('Pose data missing', { body: `${def.label} needs data from scripts/extract_pose_library.py that this build lacks.`, kind: 'error' });
+      return false;
+    }
+    // Poses pin and hold SOMA-30 joints. Switching skeletons clears the
+    // constraints, so only an empty store (or a path preset, rebuilt anyway) switches.
+    if (state.skeleton?.key !== 'soma30') {
+      const entry = presetModel();
+      if (entry && !state.store.items().length) {
+        setModel(entry);
+        toast('Model switched', { body: `Poses use the SOMA skeleton; now using ${entry.label}.` });
+      } else {
+        toast('Poses need a SOMA model', { body: entry ? `Switch the motion model to ${entry.label} first (your constraints belong to the current skeleton). Until then only the prompt phrase is used.` : 'No SOMA model is installed: only the prompt phrase is used.', kind: 'warn', timeout: 8000 });
+      }
+    }
+  }
+  const previous = state.pose;
+  setPose(choice);
+  const id = state.pose?.id ?? null;
+  if (state.preset && !presetIntact()) {
+    // Edited since it was applied: rebuilding would drop the edits, so the
+    // preset is forgotten and the pose goes onto the current prompts.
+    const forgotten = state.preset;
+    const old = forgotten.poseId ? poseById(forgotten.poseId).label : null;
+    const stays = old ? ` Its ${old} pins stay on the timeline and are still sent.` : '';
+    toast('Path preset not rebuilt', {
+      body: `${forgotten.label} was edited after it was applied, so it is not rebuilt.${stays} ${id ? 'The new pose is added to your current prompts and constraints at Generate.' : ''} Re-apply the preset (Edit, then Apply) to rebuild it ${id ? 'with the pose' : 'without a pose'}.`.replace(/\s+/g, ' '),
+      kind: 'warn', timeout: 9000,
+    });
+    state.preset = null;
+    updatePresetReadout();
+    updateDownload();
+  }
+  if (state.preset) {
+    const p = state.preset;
+    let built;
+    try {
+      built = buildPosedPreset(p.id, p.params, id, state.pose?.params, { skeletonKey: state.skeleton?.key === 'soma30' ? 'soma30' : (state.skeleton?.key || 'soma30') });
+    } catch (err) {
+      setPose(previous);
+      toast('Could not rebuild the path preset', { body: errorText(err), kind: 'error' });
+      return false;
+    }
+    built.prompt = posePrompt(id, p.basePrompt ?? p.prompt);
+    built.basePrompt = p.basePrompt ?? built.basePrompt;
+    if (applyPreset(built, { generate: andGenerate, keepSettings: true }) === false) {
+      setPose(previous);
+      return false;
+    }
+    return true;
+  }
+  if (state.editing) exitEditing({ quiet: true });
+  const def = id ? poseById(id) : null;
+  // A stance pose adds nothing without a path preset, not even its word swap.
+  setSegments(state.segments.map((s) => ({ ...s, prompt: def?.kind === 'stance' ? stripPosePhrases(s.prompt).trim() : posePrompt(id, s.prompt) })));
+  const hands = state.store.items().some((it) => it.track === 'left-hand' || it.track === 'right-hand');
+  const kept = hands && previous ? ' Hand constraints already on the timeline stay and are still sent: delete them on the Left/Right Hand tracks if they came from the previous pose.' : '';
+  toast(def ? `${def.label} selected` : 'Pose cleared', {
+    body: (!def ? 'Generations use the prompts and constraints as they are.'
+      : def.kind === 'stance' ? `${def.label} is made with pins that come with the path presets: apply one (Browse presets…) and it is built in. On its own it adds nothing.`
+        : 'Its phrase is in the prompts. Generate sends its pose layer, and hand pins where a 2D root with headings covers the clip; with a path preset it is built into the preset.') + kept,
+    kind: 'success',
+    timeout: kept ? 8000 : undefined,
   });
   if (andGenerate) generate();
   return true;
@@ -980,6 +1191,7 @@ function updateButtons() {
   $('model').disabled = editing || busy;
   $('modeBanner').hidden = !editing;
   presetsDialog?.syncGenerate();
+  posesDialog?.syncGenerate();
   updateSnap();
   updateHeadingRow();
 }
@@ -1170,7 +1382,7 @@ function wireUI() {
   $('quantization').addEventListener('change', updateQuantizationHint);
   $('addSegment').addEventListener('click', () => {
     if (state.segments.length >= MAX_SEGMENTS) return;
-    setSegments([...state.segments, { prompt: DEFAULT_PROMPT, frames: DEFAULT_FRAMES }]);
+    setSegments([...state.segments, { prompt: newSegmentPrompt(), frames: DEFAULT_FRAMES }]);
     const areas = $('segments').querySelectorAll('textarea');
     areas[areas.length - 1]?.focus();
     areas[areas.length - 1]?.select();
@@ -1183,10 +1395,24 @@ function wireUI() {
     canApply: () => !state.active,
     canGenerate: () => !state.active && !state.editing,
     skeletonKey: presetSkeletonKey,
+    pose: () => state.pose, // presets are built with the selected pose
     keepVisible: [$('toasts')], // toasts stay readable above the modal
   });
   $('browsePresets').addEventListener('click', () => presetsDialog.open());
   $('editPreset').addEventListener('click', () => presetsDialog.open(state.preset));
+
+  // Poses
+  posesDialog = new PosesDialog({
+    onApply: applyPose,
+    canApply: () => !state.active,
+    canGenerate: () => !state.active && !state.editing,
+    context: poseContext,
+    skeleton: poseSkeleton,
+    keepVisible: [$('toasts')],
+  });
+  $('browsePoses').addEventListener('click', () => { if (state.store) posesDialog.open(state.pose); });
+  $('editPose').addEventListener('click', () => { if (state.store) posesDialog.open(state.pose); });
+  $('clearPose').addEventListener('click', () => applyPose(null));
 
   // Constraints panel
   $('editMode').addEventListener('click', () => (state.editing ? exitEditing() : enterEditing()));
@@ -1341,7 +1567,7 @@ async function main() {
   wireEditor();
   timeline = new Timeline($('timeline'), timelineCallbacks, {
     minFrames: MIN_FRAMES, maxFrames: MAX_FRAMES, maxSegments: MAX_SEGMENTS,
-    defaultPrompt: DEFAULT_PROMPT, defaultFrames: DEFAULT_FRAMES, fps: FPS,
+    defaultPrompt: newSegmentPrompt(), defaultFrames: DEFAULT_FRAMES, fps: FPS,
   });
   setSegments(state.segments);
   onStoreChange();
@@ -1365,10 +1591,12 @@ window.__kimodo = {
   get timeline() { return timeline; },
   get store() { return state.store; },
   get presets() { return presetsDialog; },
+  get poses() { return posesDialog; },
   setFrame,
   selectAnimation,
   applyPreset,
-  buildPreset,
+  applyPose,
+  buildPosedPreset,
 };
 Object.defineProperty(window, '__kimodoEditor', { get: () => editor, configurable: true });
 

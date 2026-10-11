@@ -7,10 +7,11 @@
 // presets.js.
 //
 // API
-//   new PresetsDialog({onApply, canGenerate, canApply, skeletonKey, keepVisible})
-//     onApply(built, {generate})  Built preset of presets.js buildPreset with
-//                                 `prompt` = the dialog's prompt text; return
-//                                 false to keep the dialog open (refused/failed).
+//   new PresetsDialog({onApply, canGenerate, canApply, skeletonKey, pose, keepVisible})
+//     onApply(built, {generate})  Built preset of poses.js buildPosedPreset (a
+//                                 presets.js Built + `pose`) with `prompt` = the
+//                                 dialog's prompt text; return false to keep the
+//                                 dialog open (refused/failed).
 //     canGenerate()               false disables "Apply & Generate" (generation
 //                                 running or editing mode).
 //     canApply()                  optional; false disables both buttons (e.g. a
@@ -18,6 +19,8 @@
 //     skeletonKey()               optional; the skeleton key the preset will be
 //                                 built for (default 'soma30'). A non-SOMA key
 //                                 previews the path-only build and its warning.
+//     pose()                      optional; the selected pose {id, params} or null:
+//                                 presets are built (and previewed) with it.
 //     keepVisible                 optional elements (the toast stack) moved into
 //                                 the dialog while it is open, so they render
 //                                 above the modal backdrop (top layer).
@@ -45,7 +48,8 @@
 // - The prompt follows the generated text until the user edits it; "Use
 //   generated prompt" returns to it. An empty prompt applies the generated one.
 
-import { FPS, PRESETS, presetById, defaultParams, normalizeParams, simulatePreset, buildPreset, presetSVG } from './presets.js';
+import { FPS, PRESETS, presetById, defaultParams, normalizeParams, simulatePreset, presetSVG } from './presets.js';
+import { buildPosedPreset, stripPosePhrases } from './poses.js';
 
 const VIEW_KEY = 'kimodo.editor.presetsView';
 /** Collapsible ParamDef groups shown after the 'main' params. */
@@ -132,15 +136,21 @@ function summaryParts(built) {
 function pinsText(built) {
   const parts = [`2D root path on all ${built.frames} frames with a heading`];
   const hips = built.pins.filter((p) => p.kind === 'hips').map((p) => p.frame);
-  const idle = built.pins.filter((p) => p.kind === 'fullbody').map((p) => p.frame);
+  const idle = built.pins.filter((p) => p.kind === 'fullbody' && !/\.walk/.test(p.pose)).map((p) => p.frame);
+  const walk = built.pins.filter((p) => p.kind === 'fullbody' && /\.walk/.test(p.pose)).map((p) => p.frame);
   if (hips.length) parts.push(`Hips pin @ ${hips.join(', ')}`);
   if (idle.length) parts.push(`idle pose @ ${idle.join(', ')}`);
-  return `Constraints: ${parts.join(' · ')}`;
+  if (walk.length) parts.push(`walk pose @ ${walk.join(', ')}`);
+  const hands = built.pins.filter((p) => p.kind === 'hands').map((p) => p.frame);
+  if (hands.length) parts.push(`hand guide pins @ ${hands.join(', ')}`);
+  const pose = built.pose ? ` · pose: ${built.pose.label}${built.pose.layer ? ' (+ pose layer after generation)' : ''}` : '';
+  return `Constraints: ${parts.join(' · ')}${pose}`;
 }
 
 export class PresetsDialog {
-  constructor({ onApply, canGenerate = () => true, canApply = () => true, skeletonKey = () => 'soma30', keepVisible = [] } = {}) {
+  constructor({ onApply, canGenerate = () => true, canApply = () => true, skeletonKey = () => 'soma30', pose = () => null, keepVisible = [] } = {}) {
     this.onApply = onApply;
+    this.pose = pose;
     this.canGenerate = canGenerate;
     this.canApply = canApply;
     this.skeletonKey = skeletonKey;
@@ -506,7 +516,8 @@ export class PresetsDialog {
     const id = c.def.id;
     let built;
     try {
-      built = buildPreset(id, c.params, { skeletonKey: this.skeletonKey() || 'soma30' });
+      const pose = this.pose() || null;
+      built = buildPosedPreset(id, c.params, pose?.id ?? null, pose?.params, { skeletonKey: this.skeletonKey() || 'soma30' });
     } catch (err) {
       console.error(err);
       c.built = null;
@@ -580,7 +591,9 @@ export class PresetsDialog {
     this.syncGenerate();
     if (this.applyBtn.disabled || (generate && this.generateBtn.disabled)) return;
     const text = this.promptArea.value.trim();
-    const built = { ...c.built, prompt: text || c.built.prompt };
+    // basePrompt: the prompt without pose words (an edited prompt counts as the user's own).
+    const edited = c.promptDirty && !!text;
+    const built = { ...c.built, prompt: text || c.built.prompt, basePrompt: edited ? stripPosePhrases(text).trim() : c.built.basePrompt };
     let ok = false;
     try {
       ok = this.onApply ? this.onApply(built, { generate }) : false;

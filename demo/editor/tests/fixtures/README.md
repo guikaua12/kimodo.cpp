@@ -12,3 +12,6 @@
   Regenerate only if the upstream smoother changes.
 - `soma30.mjs`: the soma30 `/api/models` entry (names/parents/offsets mirror
   `demo/skeletons_extra.go`; hips/chains from upstream `kimodo/skeleton/definitions.py`).
+- `pose_layer.json`: inputs and expected outputs of the pose layer (`poses.js` `applyPoseLayer`),
+  written by `gen_pose_layer.mjs` (`node demo/editor/tests/fixtures/gen_pose_layer.mjs`). The Go twin's test
+  (`demo/pose_layer_test.go`) checks the same numbers, so regenerate it only when the layer maths change on both sides.
