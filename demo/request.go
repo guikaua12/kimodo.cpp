@@ -41,6 +41,7 @@ type generateRequest struct {
 	PostProcessing   *bool           `json:"post_processing"`
 	RootMargin       *float64        `json:"root_margin"`
 	Constraints      json.RawMessage `json:"constraints"`
+	Pose             *poseRequest    `json:"pose"` // pose preset (pose_layer.go); optional
 }
 
 // normalize fills the defaults for omitted fields and validates everything

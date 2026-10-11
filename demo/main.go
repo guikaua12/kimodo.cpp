@@ -66,6 +66,9 @@ type animation struct {
 	RootMargin      *float64 `json:"root_margin,omitempty"`
 	ConstraintCount int      `json:"constraint_count"` // constrained frames over all sets
 	ConstraintTypes []string `json:"constraint_types"` // distinct types, first-occurrence order
+	// Pose preset of the request (pose_layer.go); absent without one. Its
+	// layer, if any, is in <id>/pose.json.
+	Pose *poseSummary `json:"pose,omitempty"`
 }
 type promptSegment struct {
 	Prompt string `json:"prompt"`
@@ -533,6 +536,15 @@ func (g *gallery) worker() {
 							}
 						}
 					}
+					if err == nil && item.Pose != nil && item.Pose.Layered {
+						// The engine just wrote fresh rotations: they are the model output.
+						if err = os.Remove(filepath.Join(dir, modelRotationFile)); errors.Is(err, os.ErrNotExist) {
+							err = nil
+						}
+						if err == nil {
+							err = applyPoseFile(dir, skeletonDefinitions[model.SkeletonKey].names)
+						}
+					}
 					if err == nil {
 						err = exportSkeletonGLB(dir, model.SkeletonKey)
 					}
@@ -782,6 +794,12 @@ func (g *gallery) routes(comparisons string, web webFiles) http.Handler {
 			http.Error(w, "invalid constraints: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		if request.Pose != nil {
+			if err := request.Pose.validate(skeleton.names); err != nil {
+				http.Error(w, "invalid pose: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
 		text, ok := g.textBundles[request.TextQuantization]
 		if !ok {
 			http.Error(w, "unknown text quantization", http.StatusBadRequest)
@@ -810,6 +828,23 @@ func (g *gallery) routes(comparisons string, web webFiles) http.Handler {
 				return
 			}
 		}
+		if request.Pose != nil {
+			// The worker applies the layer from this file; the editor restores the pose from it.
+			a.Pose = request.Pose.summary()
+			dir := filepath.Join(g.output, a.ID)
+			var b []byte
+			err = os.MkdirAll(dir, 0755)
+			if err == nil {
+				b, err = json.Marshal(request.Pose)
+			}
+			if err == nil {
+				err = os.WriteFile(filepath.Join(dir, poseFile), b, 0600)
+			}
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+		}
 		g.mu.Lock()
 		g.items[a.ID] = a
 		err = g.save(a)
@@ -828,12 +863,14 @@ func (g *gallery) routes(comparisons string, web webFiles) http.Handler {
 	// constraints.json is written when the request is accepted, so it is also
 	// served for queued, running and failed animations (to retry or edit them).
 	animationFiles := map[string]string{
-		"root.f32":         "root_positions.f32",
-		"rotations.f32":    "local_rotations_xyzw.f32",
-		"contacts.f32":     "foot_contacts.f32", // [T,4] left heel, left toe, right heel, right toe
-		"smooth_root.f32":  "smooth_root.f32",   // [T,3]
-		"animation.glb":    "animation.glb",
-		"constraints.json": "constraints.json",
+		"root.f32":            "root_positions.f32",
+		"rotations.f32":       "local_rotations_xyzw.f32",
+		"contacts.f32":        "foot_contacts.f32", // [T,4] left heel, left toe, right heel, right toe
+		"smooth_root.f32":     "smooth_root.f32",   // [T,3]
+		"animation.glb":       "animation.glb",
+		"constraints.json":    "constraints.json",
+		"pose.json":           poseFile,          // the request's pose preset (with its layer)
+		"model_rotations.f32": modelRotationFile, // [T,J,4] engine output before the pose layer
 	}
 	mux.HandleFunc("/api/animations/", func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/animations/"), "/")
@@ -844,7 +881,7 @@ func (g *gallery) routes(comparisons string, web webFiles) http.Handler {
 		g.mu.RLock()
 		a := g.items[parts[0]]
 		g.mu.RUnlock()
-		if a == nil || (a.Status != "ready" && parts[1] != "constraints.json") {
+		if a == nil || (a.Status != "ready" && parts[1] != "constraints.json" && parts[1] != "pose.json") {
 			http.NotFound(w, r)
 			return
 		}
@@ -863,7 +900,7 @@ func (g *gallery) routes(comparisons string, web webFiles) http.Handler {
 			w.Header().Set("Content-Length", fmt.Sprint(len(data)))
 			_, _ = w.Write(data)
 			return
-		case "constraints.json":
+		case "constraints.json", "pose.json":
 			w.Header().Set("Content-Type", "application/json")
 		default:
 			w.Header().Set("Content-Type", "application/octet-stream")
