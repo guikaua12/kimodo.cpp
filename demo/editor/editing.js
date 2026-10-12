@@ -3,16 +3,27 @@
 //
 // While active:
 // - the viewport shows the skeleton overlay and the mesh at opacity 0.65;
-// - a root ground gizmo (TransformControls translate, X/Z only) sits at
+// - a root ground gizmo (TransformControls translate, world X/Y/Z) sits at
 //   (pelvis.x, 0, pelvis.z) and translates the whole pose at the current frame
-//   (motion.translateXZ + store.writeThrough(..., {rootTranslateOnly: true}));
+//   (motion.translate + store.writeThrough(..., {rootTranslateOnly: true})).
+//   X/Z put the pelvis under the gizmo; Y (the green arrow) raises or lowers
+//   the pose by the drag's height (hip height), and the gizmo goes back to the
+//   ground on release. The height reaches the model only through a Full-Body,
+//   hand/foot or Hips constraint at that frame (2D Root is x/z only); the
+//   'dragend' detail says when a drag changed it without one (heightUnconstrained).
+//   The gizmo has the three arrows and the XZ square only (its screen-plane
+//   centre and vertical squares would change the height by accident), hides
+//   its Y arrow while the hips translate gizmo is up (same vertical line), and
+//   a press on a skeleton joint selects the joint even over the Y arrow (which
+//   spans the legs); the X/Z arrows keep their presses;
 // - clicking a joint of the skeleton overlay selects it and attaches a rotate
 //   gizmo to a proxy at the joint whose quaternion is the joint's global
 //   rotation. TransformControls composes the drag in the proxy's frame for
 //   space 'local' (q = q0 * dq) and in world axes for 'world' (q = dq * q0), so
 //   after any drag proxy.quaternion is the new global rotation in both spaces
 //   (as upstream); it goes to motion.setJointGlobalRotation and store.writeThrough.
-//   The root joint can also translate (hip height): W = translate, E = rotate.
+//   The root joint can also translate (hip height): W = translate, E = rotate;
+//   the translate gizmo is always in world axes (Y = up), whatever the space.
 //   Hidden gizmo joints (skeleton.hiddenGizmoJoints) cannot be selected.
 // - clicking the 2D-Root waypoint of the current frame selects it and shows a
 //   Y-rotation ring that sets its optional heading (store.setRootHeading).
@@ -29,13 +40,16 @@
 //
 // Events (CustomEvent, detail in parentheses):
 //   'change'     pose / constraint edited ({frame, kind, joint?})
-//   'dragstart'  ({frame, kind, joint}), 'dragend' ({frame, kind, joint})
+//   'dragstart'  ({frame, kind, joint}),
+//   'dragend'    ({frame, kind, joint, heightUnconstrained}: the drag changed
+//                the hip height at a frame without a Full-Body/EE constraint)
 //   'select'     selection changed ({joint, name} or {waypoint: frame})
 //   'modechange' editing entered/left or gizmo mode changed ({active, space, jointMode})
 // kind: 'ground' | 'rotate' | 'translate' | 'heading' | 'undo' | 'reset' | 'snap' | 'densePath'.
 //
 // Not implemented: G1 single-axis hinge projection and joint limits (upstream
-// viz/g1_rig.py); on G1 the gizmo space is forced to 'local' as upstream.
+// viz/g1_rig.py); on G1 the rotate gizmo space is forced to 'local' as upstream
+// (the root translate gizmo is in world axes on every skeleton).
 //
 // Additions to the core API: space, selectedJoint, jointMode,
 // headingSelected, canUndo, canReset, setSpace(), setJointMode(), deselect(),
@@ -79,10 +93,12 @@ export class Editor extends EventTarget {
     }
     // Created before the pointer listeners below, so the gizmos see a press first.
     this._tc = {
-      ground: this._makeControls('ground', { mode: 'translate', space: 'world', showY: false }),
+      ground: this._makeControls('ground', { mode: 'translate', space: 'world' }),
       joint: this._makeControls('joint', { mode: 'rotate', space: 'local' }),
       heading: this._makeControls('heading', { mode: 'rotate', space: 'world', showX: false, showZ: false }),
     };
+    removeHandles(this._tc.ground, ['XYZ', 'XY', 'YZ']);
+    this._groundSuspended = false;
 
     this._onStoreChange = () => { if (this.active && !this._drag) this.refresh(); };
     // Safety net for apps that forget refresh(): re-sync before a render when
@@ -90,11 +106,14 @@ export class Editor extends EventTarget {
     this._syncKey = null;
     this._renderHook = () => this._autoSync();
     viewport.addRenderHook(this._renderHook);
+    this._onPointerDownCapture = (e) => this._pointerDownCapture(e);
     this._onPointerDown = (e) => this._pointerDown(e);
     this._onPointerUp = (e) => this._pointerUp(e);
     this._onPointerMove = (e) => this._pointerMove(e);
     this._onKeyDown = (e) => this._keyDown(e);
     const dom = viewport.domElement;
+    // Capture listeners on the target run before the gizmos' own (bubble) pointerdown.
+    dom.addEventListener('pointerdown', this._onPointerDownCapture, { capture: true });
     dom.addEventListener('pointerdown', this._onPointerDown);
     dom.addEventListener('pointerup', this._onPointerUp);
     dom.addEventListener('pointermove', this._onPointerMove);
@@ -172,9 +191,8 @@ export class Editor extends EventTarget {
     if (!Number.isInteger(j) || j >= sk.J || sk.hiddenGizmoJoints.has(j)) return false;
     this._deselectHeading();
     this.selectedJoint = j;
-    const tc = this._tc.joint;
-    tc.setSpace(this.space);
     this._setJointGizmoMode(j === sk.rootIndex ? this.jointMode : 'rotate');
+    this._syncGroundY();
     this._syncProxies(null);
     this._attach('joint');
     this.viewport.setHighlight({ selected: j });
@@ -186,6 +204,7 @@ export class Editor extends EventTarget {
     const had = this.selectedJoint >= 0 || this.headingSelected;
     if (this.selectedJoint >= 0) this._detach('joint');
     this.selectedJoint = -1;
+    this._syncGroundY();
     this._deselectHeading();
     this.viewport.setHighlight({ selected: -1 });
     if (had) this._emit('select', { joint: -1, name: null });
@@ -198,6 +217,7 @@ export class Editor extends EventTarget {
     this.jointMode = mode;
     if (this.selectedJoint === this.viewport.skeleton.rootIndex) {
       this._setJointGizmoMode(mode);
+      this._syncGroundY();
       this._syncProxies(null);
     }
     this._emit('modechange', { active: this.active, space: this.space, jointMode: mode });
@@ -323,6 +343,7 @@ export class Editor extends EventTarget {
   dispose() {
     this.exit();
     const dom = this.viewport.domElement;
+    dom.removeEventListener('pointerdown', this._onPointerDownCapture, { capture: true });
     dom.removeEventListener('pointerdown', this._onPointerDown);
     dom.removeEventListener('pointerup', this._onPointerUp);
     dom.removeEventListener('pointermove', this._onPointerMove);
@@ -361,7 +382,14 @@ export class Editor extends EventTarget {
   _setJointGizmoMode(mode) {
     const tc = this._tc.joint;
     tc.setMode(mode);
+    // Hip height is a world-Y move; a local translate arrow would follow the pelvis tilt.
+    tc.setSpace(mode === 'translate' ? 'world' : this.space);
     tc.setSize(mode === 'translate' ? GIZMO_SIZE.rootTranslate : GIZMO_SIZE.joint);
+  }
+
+  /** The ground Y arrow is hidden while the hips translate gizmo (same vertical line) is shown. */
+  _syncGroundY() {
+    this._tc.ground.showY = !(this.selectedJoint === this.viewport.skeleton.rootIndex && this.jointMode === 'translate');
   }
 
   _attach(name) {
@@ -445,7 +473,10 @@ export class Editor extends EventTarget {
     if (!this._resetSnaps.has(frame)) this._resetSnaps.set(frame, motion.snapshot(frame));
     const kind = name === 'joint' ? (tc.mode === 'translate' ? 'translate' : 'rotate') : name;
     const joint = name === 'joint' ? this.selectedJoint : motion.skeleton.rootIndex;
-    this._drag = { name, kind, frame, motion, store: st.store ?? null, numFrames: st.numFrames ?? motion.frames, joint };
+    this._drag = {
+      name, kind, frame, motion, store: st.store ?? null, numFrames: st.numFrames ?? motion.frames, joint,
+      rootY: motion.pose(frame).root[1],
+    };
     this._undo = {
       frame, motion, kind, joint, snap: motion.snapshot(frame),
       heading: kind === 'heading' ? st.store?.entriesAt(frame).root2d?.heading ?? null : undefined,
@@ -462,11 +493,14 @@ export class Editor extends EventTarget {
     const root = motion.skeleton.rootIndex;
     switch (d.kind) {
       case 'ground': {
-        // Absolute: put the pelvis under the gizmo (no accumulated deltas).
+        // X/Z absolute: put the pelvis under the gizmo (no accumulated deltas).
+        // Y: the proxy starts each drag on the ground, so its height is the
+        // lift since the drag started.
         const [x, z] = motion.rootXZ(frame);
         const dx = proxy.position.x - x, dz = proxy.position.z - z;
-        if (dx === 0 && dz === 0) return;
-        motion.translateXZ(frame, dx, dz);
+        const dy = d.rootY + proxy.position.y - motion.pose(frame).root[1];
+        if (dx === 0 && dy === 0 && dz === 0) return;
+        motion.translate(frame, dx, dy, dz);
         store?.writeThrough(frame, motion, { rootTranslateOnly: true });
         break;
       }
@@ -507,7 +541,10 @@ export class Editor extends EventTarget {
     this.viewport.setInteracting(false);
     this._syncOrbit();
     this.refresh();
-    this._emit('dragend', { frame: d.frame, kind: d.kind, joint: d.joint });
+    const at = d.store?.entriesAt(d.frame);
+    const heightUnconstrained = (d.kind === 'ground' || d.kind === 'translate')
+      && d.motion.pose(d.frame).root[1] !== d.rootY && !at?.fullbody && !at?.ee;
+    this._emit('dragend', { frame: d.frame, kind: d.kind, joint: d.joint, heightUnconstrained });
   }
 
   // -------------------------------------------------------------------------
@@ -518,6 +555,26 @@ export class Editor extends EventTarget {
     return this._drag !== null || Object.values(this._tc).some((tc) => tc.dragging);
   }
 
+  /**
+   * Runs before the gizmos see the press: a press on a skeleton joint that is
+   * not on a ground X/Z handle goes to joint selection, so the ground gizmo
+   * ignores it (its Y arrow spans the legs). Re-enabled on the next pointerup.
+   */
+  _pointerDownCapture(e) {
+    this._resumeGround();
+    const tc = this._tc.ground;
+    if (!this.active || this._drag || e.button !== 0 || !tc.enabled || /^(X|Z|XZ)$/.test(tc.axis ?? '')) return;
+    if (this.viewport.pickJoint(e.clientX, e.clientY) < 0) return;
+    tc.enabled = false;
+    this._groundSuspended = true;
+  }
+
+  _resumeGround() {
+    if (!this._groundSuspended) return;
+    this._groundSuspended = false;
+    if (this.active && !this.headingSelected) this._tc.ground.enabled = true;
+  }
+
   _pointerDown(e) {
     if (!this.active) return;
     // The gizmos' own pointerdown handlers ran first: a press on a handle is a drag, not a click.
@@ -525,6 +582,7 @@ export class Editor extends EventTarget {
   }
 
   _pointerUp(e) {
+    this._resumeGround();
     const press = this._press;
     this._press = null;
     if (!this.active || !press || press.onGizmo || press.button !== 0 || e.button !== 0) return;
@@ -539,8 +597,11 @@ export class Editor extends EventTarget {
 
   _pointerMove(e) {
     if (!this.active || this._drag || e.buttons !== 0) return;
-    const onHandle = Object.values(this._tc).some((tc) => tc.enabled && tc.axis !== null);
+    // The ground Y arrow yields to joints (see _pointerDownCapture); its other handles do not.
+    const ground = this._tc.ground;
+    const onHandle = Object.values(this._tc).some((tc) => tc.enabled && tc.axis !== null && !(tc === ground && tc.axis === 'Y'));
     const j = onHandle ? -1 : this.viewport.pickJoint(e.clientX, e.clientY);
+    if (j >= 0 && ground.axis === 'Y') ground.axis = null;
     this.viewport.setHighlight({ hover: j });
     this.viewport.domElement.style.cursor = j >= 0 ? 'pointer' : '';
   }
@@ -573,6 +634,15 @@ export class Editor extends EventTarget {
 
   _emit(type, detail) {
     this.dispatchEvent(new CustomEvent(type, { detail }));
+  }
+}
+
+/** Removes the named handles (and their pickers) of a translate TransformControls (three r170 internals). */
+function removeHandles(tc, names) {
+  const g = tc._gizmo;
+  if (!g?.gizmo?.translate || !g?.picker?.translate) throw new Error('Editor: unexpected TransformControls internals');
+  for (const group of [g.gizmo.translate, g.picker.translate]) {
+    for (const h of [...group.children]) if (names.includes(h.name)) h.removeFromParent();
   }
 }
 

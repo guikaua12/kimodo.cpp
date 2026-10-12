@@ -126,3 +126,15 @@ test('setRoot / translateXZ move the whole pose rigidly; clone is independent', 
   assert.notDeepEqual(Array.from(c.pose(0).root), Array.from(m.pose(0).root));
   assert.deepEqual(m.rootXZ(1), [0, 0]);
 });
+
+test('translate moves the whole pose rigidly in x, y and z (ground gizmo height)', () => {
+  const m = wavyMotion(3);
+  const before = m.pose(2).positions.slice();
+  const other = m.snapshot(1);
+  m.translate(2, 0.25, 0.5, -0.125);
+  const after = m.pose(2).positions;
+  for (let k = 0; k < sk.J; k++) close(vec(after, k), [before[3 * k] + 0.25, before[3 * k + 1] + 0.5, before[3 * k + 2] - 0.125], 1e-6);
+  assert.deepEqual(Array.from(m.snapshot(1).root), Array.from(other.root), 'other frames untouched');
+  m.translate(2, 0, -0.5, 0);
+  close(Array.from(m.pose(2).positions.slice(0, 3)), [before[0] + 0.25, before[1], before[2] - 0.125], 1e-6);
+});

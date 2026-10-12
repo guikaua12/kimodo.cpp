@@ -1138,7 +1138,15 @@ function wireEditor() {
     updateButtons();
   });
   // The editor re-applies the Smooth Path itself after a ground-gizmo release.
-  editor.addEventListener('dragend', () => updateButtons());
+  editor.addEventListener('dragend', (e) => {
+    updateButtons();
+    if (e.detail.heightUnconstrained) {
+      toast('Height not constrained', {
+        body: `Only a Hips, Full-Body or hand/foot keyframe at frame ${e.detail.frame} sends the hip height to the model (2D Root is ground-plane only).`,
+        kind: 'warn',
+      });
+    }
+  });
   editor.addEventListener('change', () => updateButtons());
   editor.addEventListener('select', () => updateHeadingRow());
 }

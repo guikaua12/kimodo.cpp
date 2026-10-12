@@ -218,8 +218,9 @@
         </ul>
         <h3>Editing mode</h3>
         <ul>
-          <li>The skeleton is shown. <b>Click a joint</b> to get its rotation gizmo; <b>drag the ground arrows</b> under the character to move the whole pose.</li>
-          <li>With the hips selected, <kbd>W</kbd> switches to moving them (hip height) and <kbd>E</kbd> back to rotating. <kbd>Esc</kbd> deselects.</li>
+          <li>The skeleton is shown. <b>Click a joint</b> to get its rotation gizmo; <b>drag the ground arrows</b> under the character to move the whole pose. The red and blue arrows move it on the ground; the <b>green (Y) arrow</b> raises or lowers it (hip height, e.g. the top of a jump) and goes back to the ground when released.</li>
+          <li>The height reaches the model only through a <b>Hips</b>, <b>Full-Body</b> or hand/foot keyframe at that frame; <b>2D Root</b> is ground-plane only. Add the keyframe first, then drag.</li>
+          <li>With the hips selected, <kbd>W</kbd> switches to moving them (hip height, world axes) and <kbd>E</kbd> back to rotating. <kbd>Esc</kbd> deselects.</li>
           <li>At a frame with a <b>2D Root</b> waypoint, <b>Edit heading</b> (Root 2D options) shows a ring that sets the optional facing direction of that waypoint; <b>Clear</b> removes it. Clicking the waypoint ring in the view does the same.</li>
           <li>Pick <b>Gizmo space</b> (Local/World) before entering Editing Mode.</li>
           <li>Edits change the displayed motion and any constraint already at that frame. <b>Reset Constraint</b> restores the frame, <b>Undo Move</b> reverts the last drag, <b>Snap to Constraint</b> copies the constraint’s pose into the motion.</li>

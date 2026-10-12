@@ -10,7 +10,7 @@
 // FK cache of that frame only).
 //
 // Additions to the core API: static fromBuffers(), skeleton, local, root,
-// contacts, smoothRoot, setLocalRotation(), setRootXZ(), rootXZ(), heading().
+// contacts, smoothRoot, setLocalRotation(), setRootXZ(), translate(), rootXZ(), heading().
 
 import { quatMul, quatNormalize } from './math.js';
 
@@ -168,6 +168,13 @@ export class Motion {
   translateXZ(f, dx, dz) {
     this._check(f);
     this.root[f * 3] += dx; this.root[f * 3 + 2] += dz;
+    this._touch(f);
+  }
+
+  /** Translates the whole pose by (dx, dy, dz); dy changes the hip height. */
+  translate(f, dx, dy, dz) {
+    this._check(f);
+    this.root[f * 3] += dx; this.root[f * 3 + 1] += dy; this.root[f * 3 + 2] += dz;
     this._touch(f);
   }
 

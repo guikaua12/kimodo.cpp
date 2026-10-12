@@ -240,3 +240,41 @@ test('the six upstream tracks are unchanged: no Hips unless the hips track is us
   assert.deepEqual(itemList(limbs), [['right-hand', 4, 4], ['left-foot', 4, 4]]);
   assert.deepEqual(limbs.toModelJSON(40).map((o) => o.type), ['right-hand', 'left-foot']);
 });
+
+test('writeThrough(rootTranslateOnly) after Motion#translate (the ground gizmo height drag) sends the new root y in Hips / Full-Body root_positions; 2D Root keeps only x, z', () => {
+  const m = makeMotion(30);
+  const store = new ConstraintStore(sk);
+  store.addKeyframe('hips', 10, m);
+  store.addKeyframe('fullbody', 12, m);
+  store.addKeyframe('root2d', 10, m);
+  store.addKeyframe('root2d', 14, m);
+  const local10 = store.entriesAt(10).ee.pose.local.slice();
+  const [x10, z10] = m.rootXZ(10);
+  const y12 = m.pose(12).root[1];
+
+  // lift the whole pose at 10 by 0.4 m (the editor's 'ground' drag), stored rotations kept
+  m.translate(10, 0, 0.4, 0);
+  assert.equal(store.writeThrough(10, m, { rootTranslateOnly: true }), true);
+  close(store.entriesAt(10).ee.pose.root, m.snapshot(10).root, 0);
+  close(store.entriesAt(10).ee.pose.local, local10, 0);
+  const r = store.entriesAt(10).root2d;
+  assert.deepEqual([r.x, r.z], [x10, z10], '2D Root is ground-plane only');
+
+  // lower the Full-Body keyframe at 12
+  m.translate(12, 0, -0.25, 0);
+  store.writeThrough(12, m, { rootTranslateOnly: true });
+
+  const json = store.toModelJSON(30);
+  const hips = json.find((o) => o.type === 'end-effector');
+  const fb = json.find((o) => o.type === 'fullbody');
+  assert.ok(Math.abs(hips.root_positions[hips.frame_indices.indexOf(10)][1] - m.snapshot(10).root[1]) < 1e-7);
+  assert.ok(Math.abs(fb.root_positions[fb.frame_indices.indexOf(12)][1] - (y12 - 0.25)) < 1e-6);
+
+  // a height-only edit where only a 2D Root exists changes no constraint data
+  const rootBefore = JSON.stringify(store.toModelJSON(30).find((o) => o.type === 'root2d'));
+  m.translate(14, 0, 0.3, 0);
+  store.writeThrough(14, m, { rootTranslateOnly: true });
+  assert.equal(JSON.stringify(store.toModelJSON(30).find((o) => o.type === 'root2d')), rootBefore);
+  assert.equal(store.entriesAt(14).fullbody, undefined);
+  assert.equal(store.entriesAt(14).ee, undefined);
+});
