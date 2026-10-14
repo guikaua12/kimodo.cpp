@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <expected>
+#include <functional>
 #include <span>
 #include <string>
 #include <vector>
@@ -69,6 +70,41 @@ std::expected<std::vector<float>, std::string> sample_motion_from_noise_conditio
 std::expected<std::vector<float>, std::string> sample_motion_sequence_from_noise(
     const ggml_motion_weights &weights, std::span<const sampled_sequence_segment> segments,
     unsigned transition_frames, unsigned steps, float text_weight, float constraint_weight);
+
+// One freshly sampled segment handed to the post-processing hook: unnormalized
+// world-space rows [frames, motion_dim] whose first row is global frame
+// `window_begin` (segment k >= 1 includes its `transition` re-generated rows,
+// so window_begin = start - transition). `transition_source` holds the
+// previous segment's last `transition` rows (empty for segment 0).
+struct sequence_segment_rows {
+    std::size_t segment = 0;
+    std::size_t window_begin = 0;
+    std::size_t frames = 0;
+    std::span<const float> rows;
+    std::span<const float> transition_source;
+};
+using sequence_postprocess = std::function<std::expected<std::vector<float>, std::string>(const sequence_segment_rows &)>;
+
+// User conditioning and post-processing for the multi-prompt sampler.
+struct sequence_conditions {
+    // Unnormalized observed values and 0/1 mask over the whole timeline
+    // [sum of segment frames, motion_dim] (build_conditions); empty = none.
+    std::span<const float> observed;
+    std::span<const float> mask;
+    // Upstream post_processing=True: returns replacement rows (same shape) for
+    // every sampled segment, which are appended without the transition blend.
+    sequence_postprocess post_process;
+};
+
+// `_multiprompt` with user constraints (as upstream, segment k slices rows
+// [start, start + frames) of `conditions`; k >= 1 appends them after the
+// transition rows, translated by the transition origin) and optional
+// per-segment post-processing. With empty conditions this is exactly the
+// overload above.
+std::expected<std::vector<float>, std::string> sample_motion_sequence_from_noise(
+    const ggml_motion_weights &weights, std::span<const sampled_sequence_segment> segments,
+    unsigned transition_frames, unsigned steps, float text_weight, float constraint_weight,
+    const sequence_conditions &conditions);
 
 // Build the exact condition consumed by the next `_multiprompt` DDIM run.
 // Exposed for the raw fixture test as well as the runtime orchestrator.

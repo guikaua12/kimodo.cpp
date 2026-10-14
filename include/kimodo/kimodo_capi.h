@@ -98,12 +98,36 @@ KIMODO_API kimodo_motion *kimodo_generate_embedding(
     char *err,
     int err_len);
 
+/*
+ * Text-to-motion with constraints and post-processing from one JSON request
+ * (the kmd-generate protocol v2 object): "segments": [{"frames", "prompt"}]
+ * (or "prompt_file"), optional "seed", "steps", "transition_frames",
+ * "text_cfg", "constraint_cfg", "post_processing", "root_margin" and either
+ * an inline upstream constraints.json array as "constraints" or a
+ * "constraints_file" path. "output" is ignored. Returns NULL on failure.
+ * "post_processing" is ignored for G1 (g1skel34) models, which are never
+ * post-processed (upstream policy); in a build without the post-processor
+ * (kimodo_post_processing_available() == 0) a request that sets it fails.
+ */
+KIMODO_API kimodo_motion *kimodo_generate_request(
+    kimodo_model *model,
+    const char *request_json,
+    char *err,
+    int err_len);
+
+/* 1 when this build includes the MotionCorrection post-processor (x86 only), else 0. */
+KIMODO_API int kimodo_post_processing_available(void);
+
 KIMODO_API void kimodo_motion_free(kimodo_motion *motion);
 KIMODO_API int kimodo_motion_frames(const kimodo_motion *motion);
 KIMODO_API int kimodo_motion_joints(const kimodo_motion *motion);
 /* Borrowed row-major buffers, valid until kimodo_motion_free: [T,J,4], [T,3]. */
 KIMODO_API const float *kimodo_motion_local_rotations_xyzw(const kimodo_motion *motion);
 KIMODO_API const float *kimodo_motion_root_positions(const kimodo_motion *motion);
+/* Borrowed [T,4] 0/1 foot contacts (left heel, left toe, right heel, right
+ * toe) and [T,3] model smooth root; NULL when the motion carries none. */
+KIMODO_API const float *kimodo_motion_foot_contacts(const kimodo_motion *motion);
+KIMODO_API const float *kimodo_motion_smooth_root_positions(const kimodo_motion *motion);
 
 #ifdef __cplusplus
 }

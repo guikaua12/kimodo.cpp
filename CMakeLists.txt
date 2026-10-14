@@ -12,7 +12,63 @@ set(KIMODO_ROOT_PARITY_FIXTURE "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/smplx-zero-
 set(KIMODO_LLM_TEXT_BUNDLE "${CMAKE_CURRENT_SOURCE_DIR}/generated/llm2vec-text-bundle" CACHE PATH "Native LLM2Vec GGUF component bundle required by text parity tests")
 set(KIMODO_LLM_TEXT_FIXTURE "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/llm2vec-real-prompt" CACHE PATH "Captured LLM2Vec fixture required by text parity tests")
 set(KIMODO_MULTIPROMPT_FIXTURE "" CACHE PATH "Optional extracted upstream multi-prompt fixture for raw trajectory parity")
-add_library(kimodo src/capi.cpp src/model.cpp src/gguf.cpp src/diffusion.cpp src/motion_rep.cpp src/motion_decode.cpp)
+set(KIMODO_SOMA_MODEL "${CMAKE_CURRENT_SOURCE_DIR}/models/kimodo-soma-rp-v1.1-f32.gguf" CACHE FILEPATH "Optional SOMA motion GGUF for the request test (only its header is read)")
+# NVIDIA MotionCorrection (Apache-2.0) post-processor and its Eigen (MPL-2.0)
+# headers are vendored under third_party; see the README files there. The
+# solver needs SSE4.1 intrinsics, so it is built for x86 targets only; elsewhere
+# post-processing reports that it is unavailable. It is its own C++17 target
+# with warnings off, and only the plain C++17 glue header
+# (src/motion_correction_glue.hpp) is visible to kimodo. Upstream builds it with
+# AVX flags, but its only AVX intrinsic is on a path the solver never calls, so
+# SSE4.1 is enough and the corrector also runs on CPUs without AVX.
+option(KIMODO_ENABLE_POSTPROCESS "Build the NVIDIA MotionCorrection post-processor (x86 only)" ON)
+set(KIMODO_HAVE_MOTION_CORRECTION FALSE)
+set(KIMODO_MC_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+if(MSVC AND CMAKE_CXX_COMPILER_ARCHITECTURE_ID)
+  set(KIMODO_MC_ARCH "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
+elseif(APPLE AND CMAKE_OSX_ARCHITECTURES)
+  set(KIMODO_MC_ARCH "${CMAKE_OSX_ARCHITECTURES}")
+endif()
+if(KIMODO_ENABLE_POSTPROCESS AND KIMODO_MC_ARCH MATCHES "^(x86_64|AMD64|amd64|x64|X86|x86|i[3-6]86)$")
+  set(KIMODO_MC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/motion_correction")
+  add_library(kimodo_motion_correction STATIC
+    ${KIMODO_MC_DIR}/Math/Matrix.cpp
+    ${KIMODO_MC_DIR}/Math/Quaternion.cpp
+    ${KIMODO_MC_DIR}/Math/Transform.cpp
+    ${KIMODO_MC_DIR}/Math/Types.cpp
+    ${KIMODO_MC_DIR}/Math/Vector.cpp
+    ${KIMODO_MC_DIR}/AnimProcessing/InverseKinematics.cpp
+    ${KIMODO_MC_DIR}/AnimProcessing/TrajectoryCorrector.cpp
+    ${KIMODO_MC_DIR}/AnimProcessing/Utility.cpp
+    src/motion_correction_glue.cpp)
+  set_target_properties(kimodo_motion_correction PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+  target_include_directories(kimodo_motion_correction PRIVATE "${KIMODO_MC_DIR}")
+  target_include_directories(kimodo_motion_correction SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen")
+  target_compile_definitions(kimodo_motion_correction PRIVATE EIGEN_MPL2_ONLY _CRT_SECURE_NO_WARNINGS)
+  if(MSVC)
+    # /W0 plus the two warnings the MSVC STL re-enables inside its own
+    # templates (_STL_WARNING_LEVEL >= 3), triggered by vendored code.
+    target_compile_options(kimodo_motion_correction PRIVATE /W0 /wd4244 /wd4267)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+      # clang-cl, unlike cl.exe, accepts SSE4.1 intrinsics only with the target feature.
+      target_compile_options(kimodo_motion_correction PRIVATE -msse4.1)
+    endif()
+  else()
+    target_compile_options(kimodo_motion_correction PRIVATE -w -msse4.1)
+  endif()
+  set(KIMODO_HAVE_MOTION_CORRECTION TRUE)
+else()
+  message(STATUS "kimodo: MotionCorrection post-processing disabled (KIMODO_ENABLE_POSTPROCESS=${KIMODO_ENABLE_POSTPROCESS}, arch=${KIMODO_MC_ARCH}); requests with post_processing are rejected")
+endif()
+
+add_library(kimodo src/capi.cpp src/model.cpp src/gguf.cpp src/diffusion.cpp src/motion_rep.cpp src/motion_decode.cpp
+  src/json.cpp src/constraints.cpp src/motion_encode.cpp src/postprocess.cpp)
+if(KIMODO_HAVE_MOTION_CORRECTION)
+  target_link_libraries(kimodo PRIVATE kimodo_motion_correction)
+  target_compile_definitions(kimodo PRIVATE KIMODO_HAVE_MOTION_CORRECTION=1)
+endif()
 add_library(kimodo::kimodo ALIAS kimodo)
 target_include_directories(kimodo PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
 target_compile_definitions(kimodo PRIVATE KIMODO_BUILD KIMODO_SHARED)
@@ -105,6 +161,31 @@ if(BUILD_TESTING AND KIMODO_BUILD_TESTS)
   add_executable(kimodo-capi-test tests/capi_test.cpp)
   target_link_libraries(kimodo-capi-test PRIVATE kimodo)
   add_test(NAME kimodo-capi-test COMMAND kimodo-capi-test "${KIMODO_ROOT_PARITY_MODEL}" "${KIMODO_LLM_TEXT_BUNDLE}")
+  # CPU only: parses generation requests and constraints against a real SOMA
+  # model header; skipped when that model is not present.
+  add_executable(kimodo-request-test tests/request_test.cpp)
+  target_link_libraries(kimodo-request-test PRIVATE kimodo)
+  if(EXISTS "${KIMODO_SOMA_MODEL}")
+    add_test(NAME kimodo-request-test COMMAND kimodo-request-test "${KIMODO_SOMA_MODEL}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/constraints")
+  endif()
+  add_executable(kimodo-json-test tests/json_test.cpp src/json.cpp)
+  target_include_directories(kimodo-json-test PRIVATE src)
+  add_test(NAME kimodo-json-test COMMAND kimodo-json-test)
+  add_executable(kimodo-constraints-test tests/constraints_test.cpp
+    src/json.cpp src/constraints.cpp src/motion_decode.cpp src/motion_encode.cpp src/postprocess.cpp)
+  target_include_directories(kimodo-constraints-test PRIVATE src include)
+  add_test(NAME kimodo-constraints-test COMMAND kimodo-constraints-test "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/constraints")
+  add_executable(kimodo-postprocess-test tests/postprocess_test.cpp
+    src/motion_encode.cpp src/postprocess.cpp src/motion_decode.cpp)
+  target_include_directories(kimodo-postprocess-test PRIVATE src include)
+  add_test(NAME kimodo-postprocess-test COMMAND kimodo-postprocess-test)
+  # Both tests compile src/postprocess.cpp directly.
+  if(KIMODO_HAVE_MOTION_CORRECTION)
+    foreach(KIMODO_MC_TEST kimodo-constraints-test kimodo-postprocess-test)
+      target_link_libraries(${KIMODO_MC_TEST} PRIVATE kimodo_motion_correction)
+      target_compile_definitions(${KIMODO_MC_TEST} PRIVATE KIMODO_HAVE_MOTION_CORRECTION=1)
+    endforeach()
+  endif()
   add_executable(kimodo-diffusion-test tests/diffusion_test.cpp)
   target_sources(kimodo-diffusion-test PRIVATE src/diffusion.cpp)
   target_include_directories(kimodo-diffusion-test PRIVATE src)

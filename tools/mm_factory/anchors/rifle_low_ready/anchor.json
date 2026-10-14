@@ -1,0 +1,34 @@
+{
+ "source": "C:\\Users\\Guilherme\\kimodo.cpp\\factory-output\\_screen\\rifle_low_ready\\p0_s2",
+ "frame": 51,
+ "right_offset": [
+  0.0,
+  -0.18,
+  0.02
+ ],
+ "left_offset": [
+  0.0,
+  -0.09,
+  -0.01
+ ],
+ "ik_error_m": {
+  "right": 2.3592239273284576e-16,
+  "left": 2.9893669801409083e-16
+ },
+ "posture": {
+  "pelvis_h_m": 0.9601871371269226,
+  "head_h_m": 1.5462482770049453,
+  "hands_dist_m": 0.33021783732781357,
+  "hands_h_m": 0.9764890231685797,
+  "arm_swing_cm": 0.0,
+  "hands_fwd_cm": 19.41255139075838,
+  "torso_pitch_deg": -3.998372558928362,
+  "rhand_h_m": 1.041885962819813,
+  "lhand_h_m": 0.9110920835173464,
+  "handline_fwd_cm": 5.065436917008556,
+  "handline_left_cm": 29.894968825949768,
+  "handline_down_deg": 23.333574365863818,
+  "rhand_fwd_cm": 16.879832932254104,
+  "rhand_side_cm": -10.517550104326377
+ }
+}

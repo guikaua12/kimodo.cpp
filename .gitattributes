@@ -1,0 +1,2 @@
+# Raw little-endian float32 motion data (tools/mm_factory/anchors): never convert line endings.
+*.f32 binary

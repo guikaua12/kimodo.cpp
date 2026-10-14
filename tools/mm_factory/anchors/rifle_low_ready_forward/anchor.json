@@ -1,0 +1,36 @@
+{
+ "source": "docs/motion-stage-research/probe/out_poses/lr3_I3_s2",
+ "frame": 59,
+ "right_offset": [
+  -0.031,
+  -0.104,
+  -0.043
+ ],
+ "left_offset": [
+  -0.08,
+  -0.235,
+  0.086
+ ],
+ "ik_error_m": {
+  "right": 1.0103182026100663e-16,
+  "left": 1.0007415106216802e-16
+ },
+ "posture": {
+  "pelvis_h_m": 0.9976683259010315,
+  "head_h_m": 1.5717378370857007,
+  "hands_dist_m": 0.30011297270393716,
+  "hands_h_m": 1.2617353791827712,
+  "arm_swing_cm": 0.0,
+  "hands_fwd_cm": 30.11156940895669,
+  "torso_pitch_deg": -2.381578193070279,
+  "rhand_h_m": 1.3131576438764012,
+  "lhand_h_m": 1.210313114489141,
+  "handline_fwd_cm": 27.772444862593627,
+  "handline_left_cm": 4.857910863454407,
+  "handline_down_deg": 20.040607542881506,
+  "rhand_fwd_cm": 16.22534697765988,
+  "feet_width_cm": 31.960837373999606,
+  "rhand_side_cm": -10.658778070497693
+ },
+ "_doc": "Muzzle-forward rifle low ready, authored: Kimodo has no such carry (0/72 unpinned clips, probe/poses/report_low_ready.md). Source = its upright standing high-port clip (\"A person stands still holding a rifle pointed forward with both hands.\", seed 2, frame 59); the rifle is turned 20 deg down and 10 deg inboard about the right shoulder, hands 0.30 m apart, moved 8 cm toward the centre line (probe scratch candidates.py, d20 y10 sp0.30 x0.08). The stock sits at the shoulder: the RightArm joint is 23.7 cm behind the grip along the rifle. Used only as the editor pose layer target (arms); the hand pins stay on rifle_low_ready_natural."
+}

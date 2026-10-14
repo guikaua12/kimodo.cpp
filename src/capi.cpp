@@ -62,9 +62,24 @@ kimodo_motion *kimodo_generate_embedding(kimodo_model *m, const kimodo_embedding
     } catch (const std::exception &x) { set_error(m, err, len, x.what()); return nullptr; }
     catch (...) { set_error(m, err, len, "unknown C++ exception"); return nullptr; }
 }
+kimodo_motion *kimodo_generate_request(kimodo_model *m, const char *request, char *err, int len) {
+    try {
+        if (!m || !m->value) { set_error(m, err, len, "invalid model"); return nullptr; }
+        if (!request) { set_error(m, err, len, "request JSON is required"); return nullptr; }
+        auto parsed = m->value->parse_request(request);
+        if (!parsed) { set_error(m, err, len, parsed.error()); return nullptr; }
+        auto generated = m->value->generate(parsed->segments, parsed->constraints, parsed->options);
+        if (!generated) { set_error(m, err, len, generated.error()); return nullptr; }
+        m->last_error.clear(); return new kimodo_motion{std::move(*generated)};
+    } catch (const std::exception &x) { set_error(m, err, len, x.what()); return nullptr; }
+    catch (...) { set_error(m, err, len, "unknown C++ exception"); return nullptr; }
+}
+int kimodo_post_processing_available(void) { return kimodo::post_processing_available() ? 1 : 0; }
 void kimodo_motion_free(kimodo_motion *m) { delete m; }
 int kimodo_motion_frames(const kimodo_motion *m) { return m ? static_cast<int>(m->value.frames) : 0; }
 int kimodo_motion_joints(const kimodo_motion *m) { return m ? static_cast<int>(m->value.joints) : 0; }
 const float *kimodo_motion_local_rotations_xyzw(const kimodo_motion *m) { return m && !m->value.local_rotations_xyzw.empty() ? m->value.local_rotations_xyzw.data() : nullptr; }
 const float *kimodo_motion_root_positions(const kimodo_motion *m) { return m && !m->value.root_positions.empty() ? m->value.root_positions.data() : nullptr; }
+const float *kimodo_motion_foot_contacts(const kimodo_motion *m) { return m && !m->value.foot_contacts.empty() ? m->value.foot_contacts.data() : nullptr; }
+const float *kimodo_motion_smooth_root_positions(const kimodo_motion *m) { return m && !m->value.smooth_root_positions.empty() ? m->value.smooth_root_positions.data() : nullptr; }
 }
