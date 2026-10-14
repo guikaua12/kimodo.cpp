@@ -51,3 +51,4 @@ __pycache__/
 /docs/motion-stage-research/probe/**/*.f32
 /docs/motion-stage-research/probe/presets/preview/
 /docs/motion-stage-research/probe/poses/preview/
+/docs/motion-stage-research/probe/jump/preview/glb/
