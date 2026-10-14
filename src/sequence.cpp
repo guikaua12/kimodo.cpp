@@ -57,8 +57,18 @@ std::expected<sequence_transition, std::string> prepare_sequence_transition(
 std::expected<std::vector<float>, std::string> sample_motion_sequence_from_noise(
     const ggml_motion_weights &weights, std::span<const sampled_sequence_segment> segments,
     unsigned transition_frames, unsigned steps, float text_weight, float constraint_weight) {
+    return sample_motion_sequence_from_noise(weights,segments,transition_frames,steps,text_weight,constraint_weight,sequence_conditions{});
+}
+
+std::expected<std::vector<float>, std::string> sample_motion_sequence_from_noise(
+    const ggml_motion_weights &weights, std::span<const sampled_sequence_segment> segments,
+    unsigned transition_frames, unsigned steps, float text_weight, float constraint_weight,
+    const sequence_conditions &conditions) {
     const size_t D=weights.motion_dim(),body=D-5;
     if(segments.empty()||!transition_frames||!D)return std::unexpected("sequence requires segments and a transition");
+    size_t total=0;for(const auto&segment:segments)total+=segment.frames;
+    const bool constrained=!conditions.mask.empty();
+    if(constrained&&(conditions.mask.size()!=total*D||conditions.observed.size()!=total*D))return std::unexpected("invalid sequence condition dimensions");
     auto gm=weights.f32_values("stats.global_root.mean"),gs=weights.f32_values("stats.global_root.std");
     auto bm=weights.f32_values("stats.body.mean"),bs=weights.f32_values("stats.body.std");
     if(!gm||!gs||!bm||!bs||gm->size()!=5||gs->size()!=5||bm->size()!=body||bs->size()!=body)return std::unexpected("motion GGUF lacks compatible motion statistics");
@@ -66,7 +76,52 @@ std::expected<std::vector<float>, std::string> sample_motion_sequence_from_noise
     auto unnormalize=[&](std::vector<float>&motion){for(size_t row=0;row<motion.size()/D;++row){auto*v=motion.data()+row*D;for(size_t d=0;d<5;++d)v[d]=v[d]*scale((*gs)[d])+(*gm)[d];for(size_t d=0;d<body;++d)v[5+d]=v[5+d]*scale((*bs)[d])+(*bm)[d];}};
     auto normalize=[&](std::vector<float>&motion){for(size_t row=0;row<motion.size()/D;++row){auto*v=motion.data()+row*D;for(size_t d=0;d<5;++d)v[d]=(v[d]-(*gm)[d])/scale((*gs)[d]);for(size_t d=0;d<body;++d)v[5+d]=(v[5+d]-(*bm)[d])/scale((*bs)[d]);}};
     std::vector<float> joined,previous;
-    for(size_t index=0;index<segments.size();++index){const auto&segment=segments[index];const size_t sampled_frames=segment.frames+(index?transition_frames:0);if(segment.frames<2||segment.embedding.size()!=4096||segment.initial_noise.size()!=sampled_frames*D)return std::unexpected("invalid sampled sequence segment");std::vector<float>current;if(!index){auto sampled=sample_motion_from_noise(weights,segment.initial_noise,segment.embedding,sampled_frames,steps,text_weight,constraint_weight);if(!sampled)return std::unexpected(sampled.error());current=std::move(*sampled);unnormalize(current);}else{const size_t overlap=transition_frames;if(overlap>=segment.frames||previous.size()<overlap*D)return std::unexpected("transition must be shorter than every following segment");auto transition=prepare_sequence_transition(weights,previous,segment.frames,transition_frames);if(!transition)return std::unexpected(transition.error());const float origin_x=transition->origin_x,origin_z=transition->origin_z;normalize(transition->observed);auto sampled=sample_motion_from_noise_conditioned(weights,segment.initial_noise,segment.embedding,transition->observed,transition->observed_mask,transition->first_heading,sampled_frames,steps,text_weight,constraint_weight);if(!sampled)return std::unexpected(sampled.error());current=std::move(*sampled);unnormalize(current);for(size_t frame=0;frame<sampled_frames;++frame){auto*row=current.data()+frame*D;row[0]+=origin_x;row[2]+=origin_z;}const size_t start=joined.size()-overlap*D;for(size_t frame=0;frame<overlap;++frame){const float alpha=overlap==1?.5F:1.F-float(frame)/float(overlap-1);for(size_t d=0;d<D;++d)joined[start+frame*D+d]=alpha*joined[start+frame*D+d]+(1.F-alpha)*current[frame*D+d];}joined.insert(joined.end(),current.begin()+static_cast<std::ptrdiff_t>(overlap*D),current.end());}if(!index)joined=current;previous=std::move(current);}
+    size_t start=0;
+    for(size_t index=0;index<segments.size();++index){
+        const auto&segment=segments[index];const size_t sampled_frames=segment.frames+(index?transition_frames:0);
+        if(segment.frames<2||segment.embedding.size()!=4096||segment.initial_noise.size()!=sampled_frames*D)return std::unexpected("invalid sampled sequence segment");
+        // User condition rows [start, start + frames) of the global timeline.
+        const auto user_observed=constrained?conditions.observed.subspan(start*D,segment.frames*D):std::span<const float>{};
+        const auto user_mask=constrained?conditions.mask.subspan(start*D,segment.frames*D):std::span<const float>{};
+        const bool user=std::any_of(user_mask.begin(),user_mask.end(),[](float value){return value!=0.F;});
+        std::vector<float>current;
+        if(!index){
+            if(!user){auto sampled=sample_motion_from_noise(weights,segment.initial_noise,segment.embedding,sampled_frames,steps,text_weight,constraint_weight);if(!sampled)return std::unexpected(sampled.error());current=std::move(*sampled);}
+            else{
+                // Upstream segment 0: world-space conditions, first heading 0.
+                std::vector<float>observed(user_observed.begin(),user_observed.end());normalize(observed);
+                auto sampled=sample_motion_from_noise_conditioned(weights,segment.initial_noise,segment.embedding,observed,user_mask,0.F,sampled_frames,steps,text_weight,constraint_weight);if(!sampled)return std::unexpected(sampled.error());current=std::move(*sampled);
+            }
+            unnormalize(current);
+        }else{
+            const size_t overlap=transition_frames;if(overlap>=segment.frames||previous.size()<overlap*D)return std::unexpected("transition must be shorter than every following segment");
+            auto transition=prepare_sequence_transition(weights,previous,segment.frames,transition_frames);if(!transition)return std::unexpected(transition.error());
+            const float origin_x=transition->origin_x,origin_z=transition->origin_z;
+            // User rows follow the transition rows; like upstream translate_2d
+            // they move by -origin in smooth x/z (positions are smooth-relative).
+            if(user)for(size_t frame=0;frame<segment.frames;++frame){auto*value=transition->observed.data()+(overlap+frame)*D;auto*mask=transition->observed_mask.data()+(overlap+frame)*D;const float*source=user_observed.data()+frame*D;const float*source_mask=user_mask.data()+frame*D;for(size_t d=0;d<D;++d)if(source_mask[d]!=0.F){value[d]=source[d];mask[d]=1.F;}if(source_mask[0]!=0.F)value[0]-=origin_x;if(source_mask[2]!=0.F)value[2]-=origin_z;}
+            normalize(transition->observed);
+            auto sampled=sample_motion_from_noise_conditioned(weights,segment.initial_noise,segment.embedding,transition->observed,transition->observed_mask,transition->first_heading,sampled_frames,steps,text_weight,constraint_weight);if(!sampled)return std::unexpected(sampled.error());
+            current=std::move(*sampled);unnormalize(current);for(size_t frame=0;frame<sampled_frames;++frame){auto*row=current.data()+frame*D;row[0]+=origin_x;row[2]+=origin_z;}
+            if(!conditions.post_process){
+                // Upstream blends with alpha = torch.linspace(1, 0, ntf). For ntf == 1
+                // that is [1.0]: the single transition frame keeps the previous
+                // segment's row (kimodo.cpp used 0.5 before the constraint work).
+                const size_t start_row=joined.size()-overlap*D;for(size_t frame=0;frame<overlap;++frame){const float alpha=overlap==1?1.F:1.F-float(frame)/float(overlap-1);for(size_t d=0;d<D;++d)joined[start_row+frame*D+d]=alpha*joined[start_row+frame*D+d]+(1.F-alpha)*current[frame*D+d];}joined.insert(joined.end(),current.begin()+static_cast<std::ptrdiff_t>(overlap*D),current.end());
+            }
+        }
+        if(conditions.post_process){
+            // Upstream post_processing=True: correct the whole sampled window
+            // (transition included), re-encode it and append it unblended.
+            const size_t overlap=index?transition_frames:0;
+            const sequence_segment_rows rows{index,start-overlap,sampled_frames,current,index?std::span<const float>(previous).subspan(previous.size()-overlap*D):std::span<const float>{}};
+            auto processed=conditions.post_process(rows);if(!processed)return std::unexpected(processed.error());
+            if(processed->size()!=current.size())return std::unexpected("post-processing changed the segment shape");
+            current=std::move(*processed);
+            if(index){joined.resize(joined.size()-overlap*D);joined.insert(joined.end(),current.begin(),current.end());}
+        }
+        if(!index)joined=current;previous=std::move(current);start+=segment.frames;
+    }
     return joined;
 }
 } // namespace kimodo::detail

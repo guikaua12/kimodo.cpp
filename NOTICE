@@ -5,3 +5,58 @@ https://github.com/ggml-org/ggml
 
 The demo displays the LocalAI logo from the LocalAI project:
 https://github.com/mudler/LocalAI
+
+This project includes MotionCorrection from NVIDIA Kimodo
+(https://github.com/nv-tlabs/kimodo), Copyright (c) 2026 NVIDIA CORPORATION &
+AFFILIATES, Apache License 2.0; source in third_party/motion_correction.
+
+This project includes Eigen 3.4.0 headers (https://eigen.tuxfamily.org),
+MPL-2.0; source in third_party/eigen.
+
+The Eigen sparse LU solver used by MotionCorrection includes COLAMD ordering
+code (third_party/eigen/Eigen/src/OrderingMethods/Eigen_Colamd.h), modified
+from the colamd/symamd library, whose notice follows:
+
+  The authors of the code itself are Stefan I. Larimore and Timothy A.
+  Davis (davis@cise.ufl.edu), University of Florida.  The algorithm was
+  developed in collaboration with John Gilbert, Xerox PARC, and Esmond
+  Ng, Oak Ridge National Laboratory.
+
+  Copyright (c) 1998-2003 by the University of Florida.
+  All Rights Reserved.
+
+  THIS MATERIAL IS PROVIDED AS IS, WITH ABSOLUTELY NO WARRANTY
+  EXPRESSED OR IMPLIED.  ANY USE IS AT YOUR OWN RISK.
+
+  Permission is hereby granted to use, copy, modify, and/or distribute
+  this program, provided that the Copyright, this License, and the
+  Availability of the original version is retained on all copies and made
+  accessible to the end-user of any code or package that includes COLAMD
+  or any modified version of COLAMD.
+
+  Availability: the colamd/symamd library is available at
+  http://www.suitesparse.com
+
+The Eigen sparse LU solver itself (third_party/eigen/Eigen/src/SparseLU/ and
+Eigen/src/SparseCore/SparseColEtree.h) is modified by the Eigen authors from
+SuperLU 3.1, whose notice follows:
+
+  -- SuperLU routine (version 3.1) --
+  Univ. of California Berkeley, Xerox Palo Alto Research Center,
+  and Lawrence Berkeley National Lab.
+  August 1, 2008
+
+  Copyright (c) 1994 by Xerox Corporation.  All rights reserved.
+
+  THIS MATERIAL IS PROVIDED AS IS, WITH ABSOLUTELY NO WARRANTY
+  EXPRESSED OR IMPLIED.  ANY USE IS AT YOUR OWN RISK.
+
+  Permission is hereby granted to use or copy this program for any
+  purpose, provided the above notices are retained on all copies.
+  Permission to modify the code and to distribute modified code is
+  granted, provided the above notices are retained, and a notice that
+  the code was modified is included with the above copyright notice.
+
+The demo's constraint editor includes three.js r170 (https://threejs.org),
+Copyright 2010-2024 three.js authors, MIT License; source and license in
+demo/assets/three.

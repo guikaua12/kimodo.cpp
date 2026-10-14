@@ -18,11 +18,15 @@ the model actually predicts. The text encoder uses eight-layer Vulkan chunks by
 default; set `KIMODO_TEXT_LAYER_CHUNK=1..32` to tune VRAM use.
 
 Included: checked GGUF loading, safetensors conversion, DDIM sampling, C/C++
-APIs, conditioned multi-prompt transitions, CPU/Vulkan parity tests,
-skeleton-only GLB export, selective LLM2Vec quantisation, divergence reporting,
-and local generation/comparison viewers. General constraint input, 77-joint
-SOMA expansion, skinned-mesh GLB export, and motion-denoiser quantisation are
-not implemented yet.
+APIs, conditioned multi-prompt transitions, kinematic constraints (full-body
+keyframes, hand/foot end-effectors, 2D root waypoints and paths with optional
+heading) with upstream `constraints.json` import/export, NVIDIA MotionCorrection
+post-processing (x86/x86-64 only: the solver needs SSE4.1; configure with
+`-DKIMODO_ENABLE_POSTPROCESS=OFF` to leave it out), CPU/Vulkan parity tests,
+skeleton-only GLB export, selective LLM2Vec quantisation, divergence
+reporting, a local web constraint editor and comparison viewer. 77-joint SOMA
+output expansion, skinned-mesh GLB export, and motion-denoiser quantisation
+are not implemented yet.
 
 ## Build and test on Linux
 
@@ -73,6 +77,40 @@ beside `tokenizer.gguf` or the legacy component directory. Use
 root translations and local XYZW rotations; query the joint count from the
 result rather than assuming a fixed skeleton.
 
+## Constraints
+
+Constraints use NVIDIA Kimodo's `constraints.json` format: a JSON array of
+`root2d`, `fullbody`, `left-hand`, `right-hand`, `left-foot`, `right-foot` and
+`end-effector` objects with global 30 fps `frame_indices`, axis-angle
+`local_joints_rot` on the model's control skeleton (SOMA files with 77 joints
+are reduced to the 30 predicted joints), pelvis `root_positions` and optional
+`smooth_root_2d`/`global_root_heading`. Files saved by the official demo or CLI
+load unchanged; see `tests/data/constraints` for examples and
+[`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md#constraints) for the exact
+semantics. `kmd-generate` takes one JSON request:
+
+```sh
+cat > request.json <<'JSON'
+{"output": "out/walk", "seed": 43, "steps": 100, "transition_frames": 5,
+ "text_cfg": 2.0, "constraint_cfg": 2.0, "post_processing": true,
+ "root_margin": 0.04,
+ "segments": [{"frames": 150, "prompt": "A person walks forward and picks something up"}],
+ "constraints_file": "tests/data/constraints/soma_03_full_body_keyframes.json"}
+JSON
+build/debug/kmd-generate models/kimodo-soma-rp-v1.1-f32.gguf Llama-3-Kimodo-Q8_0.gguf \
+  --request request.json
+```
+
+It writes `root_positions.f32` [T,3], `local_rotations_xyzw.f32` [T,J,4],
+`foot_contacts.f32` [T,4] and `smooth_root.f32` [T,3] (little-endian float32).
+The same object (with `"constraints": [...]` inline if preferred) drives
+`kimodo_generate_request` in the C API, `model::parse_request` plus
+`model::generate` in C++, and JSON lines of `kmd-generate --server`. Omitted
+fields keep their defaults; post-processing defaults to off in the API and is
+never applied to G1, like upstream. In a build without the post-processor
+(`kimodo_post_processing_available()` returns 0) a request that sets it fails
+before any sampling.
+
 ## Demo
 
 After building the debug preset and downloading the native GGUF bundle:
@@ -81,10 +119,14 @@ After building the debug preset and downloading the native GGUF bundle:
 go run ./demo -addr 0.0.0.0:8094
 ```
 
-Open `http://localhost:8094`. The left sidebar contains the prompt and a
-persistent history plus motion-model and text-encoder-quantization selectors;
-choosing a previous animation restores its prompt and encoder choice for a new
-generation. Every successful animation also writes a standalone
+On Windows, `start-kimodo-web.cmd` in the repository root starts the
+`build-win` server (`build-win\kimodo-demo.exe -generator
+build-win\kmd-generate.exe`) on `http://127.0.0.1:8094` and opens the
+browser; close its window to stop the server.
+
+Open `http://localhost:8094` for the web constraint editor described below.
+Generated animations are kept in `demo-output/` and listed under "Past
+animations". Every successful animation also writes a standalone
 `animation.glb` beside its raw streams, for example
 `demo-output/<animation-id>/animation.glb`. It contains the selected animated
 node hierarchy (no mesh), ready to copy into a Three.js project. It is also
@@ -101,6 +143,62 @@ The demo reuses one native worker while the selected motion model and text
 quantization remain unchanged, preserving both weight sets across requests.
 Profiling controls, measurements, and the next optimization targets are in
 [`docs/PROFILING.md`](docs/PROFILING.md).
+
+### Web constraint editor
+
+The page follows NVIDIA's Kimodo demo:
+
+- **Tabs.** *Generate* holds the motion model, text-encoder quantization,
+  prompt segments, seed, diffusion steps, text and constraint CFG weights,
+  transition frames, Post Processing (with its root margin), the constraint
+  panel and the past animations. *Visualize* toggles the mesh, skeleton, foot
+  contacts, labels and starting direction. *Instructions* explains the editor.
+- **Timeline.** The Prompts row holds one block per text segment: drag a
+  boundary or the last edge to change durations, Shift+click to split,
+  right-click to delete or merge, double-click to edit the text. Seven tracks
+  hold the constraints: **Full-Body**, **2D Root**, **Left/Right Hand**,
+  **Left/Right Foot** and **Hips** (a generic `end-effector` on the root
+  joint: it pins the pelvis position, hip height and pelvis rotation). Click a track to add a keyframe snapshotted from the
+  displayed motion (keep the button held to drag it), Ctrl/Cmd-drag to add an
+  interval or stretch an item, drag to move, right-click to delete. A hand or
+  foot keyframe also fixes the pelvis position, hip height and facing of its
+  stored pose. Constraints past the end of a shortened clip are kept (drawn
+  faded) but not sent.
+- **Editing Mode** shows the skeleton: click a joint for its rotation gizmo
+  (Local or World space), drag the ground gizmo under the character to move
+  the whole pose (W/E switch the hips between moving and rotating), and set an
+  optional facing direction on a 2D Root waypoint. Edits update the
+  constraints at that frame; Reset Constraint, Undo Move and Snap to
+  Constraint are available.
+- **Make Smooth Path** turns the 2D Root waypoints into a dense, smoothed root
+  path anchored at the first and last frame.
+- **Save / Load Constraints** read and write the official Kimodo
+  `constraints.json`. SOMA files are written with the 30 control joints, like
+  the shipped SOMA examples; 77-joint files saved by the official demo are
+  accepted.
+- **Post Processing** (foot-skate cleanup and exact constraint enforcement) is
+  on by default and hidden for G1 models.
+- Selecting a past animation restores its prompts, model, settings and
+  constraints. Settings an older animation did not record (CFG weights, Post
+  Processing, root margin) keep their current values.
+- Tips: keep fewer than 20 constrained frames per constraint type (dense 2D
+  root paths are fine) and at most 10 s per prompt.
+
+Deviations from the upstream demo:
+
+- There is no CFG-enable checkbox: the engine always runs separated text and
+  constraint CFG, so only the two weights are exposed.
+- SOMA hand-end joints (`*HandMiddleEnd`, `*HandThumbEnd`) are placed with the
+  30-joint control skeleton's FK, like upstream's CLI. The Hugging Face demo
+  uses 77-joint FK, so `*HandMiddleEnd` differs there by a few centimetres.
+- G1 motions are never post-processed, like upstream.
+- The Hips track is an addition; upstream's demo has none (its
+  `constraints.json` format already allows a Hips end-effector).
+
+Editor development notes (serving it from the checkout with `-web-dir demo`,
+the viewport harness, module overview) are in
+[`demo/editor/README.md`](demo/editor/README.md). The demo's tests run with
+`go test ./demo` and `node --test demo/editor/tests/`.
 
 Quantisation comparisons produced by the workflow in
 [`docs/QUANTIZATION.md`](docs/QUANTIZATION.md) can be opened at

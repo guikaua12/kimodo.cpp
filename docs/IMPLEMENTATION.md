@@ -213,6 +213,72 @@ production asset export is a standards-compliant animated GLB with a skin,
 joint hierarchy and local quaternion rotation tracks.  It must not use morph
 targets for skeletal motion.
 
+## Constraints
+
+`src/constraints.cpp` ports NVIDIA Kimodo's constraint sets
+(`kimodo/constraints.py`) and `KimodoMotionRep.create_conditions` for the
+three control skeletons. The essentials, with the upstream code they follow:
+
+- **Conditions.** Every constraint is applied over the whole timeline in the
+  fixed upstream key order: smooth root x/z (features 0, 2), root y (1),
+  heading cos/sin (3, 4), global 6D rotations (first two matrix columns),
+  joint positions relative to the merged smooth root (`5+3j`). Duplicate
+  entries keep the last appended value (PyTorch CPU scatter behaviour), so a
+  later `root2d` overrides a full-body smooth root and the full-body positions
+  are expressed relative to it. Full-body sets mask `[0, 5+3J)`; hand/foot sets
+  mask features 0-4, the positions of their limb chain and the 6D rotation of
+  the chain base (and therefore also pin the pelvis height and facing);
+  `end-effector` takes `joint_names` (LeftFoot, RightFoot, LeftHand, RightHand,
+  Hips); `root2d` masks 0 and 2 (plus 3-4 with `global_root_heading`, stored as
+  given). Missing `smooth_root_2d` defaults to the pelvis x/z. FK uses the same
+  double-precision accumulation as `condition_row` in `src/sequence.cpp`;
+  `kimodo-constraints-test` checks both agree to 1e-5.
+- **Sampling.** `sample_motion_sequence_from_noise` follows upstream
+  `_multiprompt`: segment *k* uses rows `[start, start+frames)` of the user
+  conditions. Segment 0 samples with them (first heading 0, conditions in world
+  coordinates); later segments append them after the transition rows, with the
+  smooth root shifted by the transition origin, then normalise. Without user
+  conditions and post-processing the code path is the previous one, bit for
+  bit, with one intentional exception: for `transition_frames == 1` the
+  transition blend now follows upstream (`alpha = torch.linspace(1, 0, 1) ==
+  [1]`, the single transition frame keeps the previous segment's row) where
+  kimodo.cpp used to blend it 50/50. This is the only change to unconstrained
+  output; it affects multi-prompt requests with a 1-frame transition only.
+- **Post-processing.** When enabled, every sampled segment is decoded,
+  corrected with the previous segment's last `ntf` frames as a full-body
+  constraint followed by the user constraints cropped to
+  `[start - ntf, start + frames)`, re-encoded (`src/motion_encode.cpp`) and
+  appended without blending, as upstream does. G1 is never post-processed
+  (upstream CLI and demo policy); `model::generate` and the C API ignore the
+  flag for G1 models. The MotionCorrection solver needs SSE4.1, so it is built
+  for x86 targets only (`-DKIMODO_ENABLE_POSTPROCESS=OFF` leaves it out
+  everywhere); `kimodo::post_processing_available()` /
+  `kimodo_post_processing_available()` report it, and without it a request
+  with `post_processing` fails before any text encoding or sampling.
+- **constraints.json.** Axis-angle uses upstream's Rodrigues and
+  `matrix_to_axis_angle`; SOMA files with 77 joints are reduced with the
+  upstream 30-of-77 name slice; output keeps upstream key order but always
+  writes the control-skeleton joint count (30 for SOMA, like every shipped
+  SOMA example) and the smooth root. Frame indices may be unsorted and may be
+  written as integral floats. Validation rejects out-of-range frames, wrong
+  array sizes, non-finite values, zero quaternions, unknown types (including
+  `end-effectors`) and unknown end-effector names. SOMA hand end joints use
+  30-joint FK like upstream's CLI; the HF demo's 77-joint session places
+  `*HandMiddleEnd` a few centimetres differently.
+- **Requests.** `model::parse_request` reads the generator protocol v2 object
+  (`output`, `seed`, `steps`, `transition_frames`, `text_cfg`,
+  `constraint_cfg`, `post_processing`, `root_margin`, `segments` with
+  `prompt`/`prompt_file`, `constraints`/`constraints_file`). `seed` may be a
+  JSON number or a decimal string; numbers are doubles, exact only up to
+  2^53, so the Go demo always sends the seed as a string. Paths inside the
+  JSON are UTF-8. The JSON reader rejects duplicate keys and objects with
+  more than 4096 members (constraint objects have at most seven keys), so a
+  padded document fails quickly instead of stalling the worker. `kmd-generate
+  --server` accepts it as one JSON line (legacy TSV lines still work) and
+  answers `OK\t<frames>\t<joints>` or `ERR\t<message>`; `kmd-generate MOTION
+  TEXT --request REQUEST.json` runs one request; `kimodo_generate_request` is
+  the C entry point and `kimodo_motion_foot_contacts` returns the contacts.
+
 ## Reference and conversion pipeline
 
 All checkpoints are handled in an isolated trusted Python container.  The
